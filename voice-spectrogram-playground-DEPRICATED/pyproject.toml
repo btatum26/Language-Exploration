@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "voice-spectrogram-playground"
+version = "0.1.0"
+description = "A local, interactive playground for exploring voice acoustics."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "kaleido>=1.0,<2",
+  "librosa>=0.11,<1",
+  "numpy>=2.0,<3",
+  "plotly>=6.0,<7",
+  "scipy>=1.14,<2",
+  "soundfile>=0.13,<1",
+  "streamlit>=1.40,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0,<9"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
