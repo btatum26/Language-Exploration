@@ -1,0 +1,14 @@
+QWidget { background: #202225; color: #e3e6e8; font-size: 10pt; }
+QMainWindow, QMenuBar, QMenu, QToolBar, QStatusBar { background: #181a1d; }
+QToolBar { border-bottom: 1px solid #3b3f45; spacing: 3px; padding: 3px; }
+QPushButton, QToolButton, QComboBox, QDoubleSpinBox, QSpinBox {
+  background: #2b2e33; border: 1px solid #454a52; border-radius: 2px; padding: 3px 6px;
+}
+QPushButton:checked, QToolButton:checked { background: #315f7d; border-color: #59a5d8; }
+QLineEdit { background: #25282c; border: 1px solid #454a52; padding: 3px; }
+QTabWidget::pane { border: 1px solid #353941; }
+QTabBar::tab { background: #282b30; padding: 6px 16px; }
+QTabBar::tab:selected { background: #353941; color: white; }
+QScrollArea { border: 0; }
+QDockWidget::title { background: #26292e; padding: 5px; }
+QToolTip { background: #111315; color: white; border: 1px solid #555; }

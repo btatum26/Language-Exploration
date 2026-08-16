@@ -1,0 +1,12 @@
+.venv/
+.uv-cache/
+.pytest_cache/
+.pytest-tmp*/
+.spectrogram-test-tmp*/
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec.bak
+
+recordings/
