@@ -359,7 +359,7 @@ Mouse-wheel and toolbar zoom should operate around the cursor or playhead. Linke
 
 ### Fourier view
 
-Analyze the shared selection. If no selection exists, analyze a short window centered on the playhead.
+Analyze the active track's selection. If no selection exists, analyze a short window centered on the playhead.
 
 Provide:
 

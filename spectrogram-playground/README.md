@@ -48,17 +48,17 @@ uv run ruff check .
 - `Shift+Left`/`Shift+Right`: seek 500 ms; `+`/`-`: zoom
 - Left-click or left-drag a timeline, waveform, or spectrogram to move the playhead
 - `Ctrl`+left-drag defines or changes that track's selection and makes the track active; `Escape` clears the active track's selection
-- Middle-drag pans horizontally; mouse wheel zooms around the cursor. Dragging is measured in screen
-  pixels so the viewport remains stable while it moves.
+- The mouse wheel scrolls vertically through tracks; `Shift`+wheel pans horizontally along the shared timeline. Middle-drag also pans horizontally. Dragging is measured in screen pixels so the viewport remains stable while it moves.
 - `Ctrl+C` copies the active track's selected audio; `Ctrl+X` cuts it; `Ctrl+V` pastes at the playhead; `Delete` removes it
 - `Ctrl+M` moves the active track's selection to the playhead. Each track retains its own selection; copy/paste uses an in-app audio clipboard and can cross tracks.
 - Track headers provide rename, active selection, mute, solo, visibility, gain, reorder, and remove controls
-- The Track menu can trim the active track's start or end to the playhead, keep only the shared selection, or reset the trim. To align recordings, make each track active in turn, seek to its spoken onset, and choose **Trim active track start to playhead**.
+- Tracks have a 145 px minimum height. Drag the thin bottom edge of a track to resize it; the track list scrolls vertically when its lanes exceed the available space.
+- The Track menu can trim the active track's start or end to the playhead, keep only that track's selection, or reset the trim. To align recordings, make each track active in turn, seek to its spoken onset, and choose **Trim active track start to playhead**.
 - The first Record click asks for an input device. While recording, a red strip above the timeline shows the selected device, elapsed time, live input level, and a Stop recording button.
 
 ## Visualizations
 
-Waveform displays time-domain amplitude using cached min/max envelopes. Spectrogram displays frequency energy through time with shared speech-oriented STFT settings; Mel mode groups frequencies perceptually. Optional F0 and RMS overlays show estimated vocal-fold repetition and energy. Experimental F1-F3 overlays use LPC spectral-envelope roots to estimate vocal-tract resonances and are most reliable on steady voiced vowels. Fourier Transform compares the shared selection, or a labeled short window around the playhead when there is no selection. Short regions use a windowed FFT and long regions use deterministic Welch averaging.
+Waveform displays time-domain amplitude using cached min/max envelopes. Spectrogram displays frequency energy through time with shared speech-oriented STFT settings; Mel mode groups frequencies perceptually. Optional F0 and RMS overlays show estimated vocal-fold repetition and energy. Experimental F1-F3 overlays use LPC spectral-envelope roots to estimate vocal-tract resonances and are most reliable on steady voiced vowels. Fourier Transform compares the active track's selection, or a labeled short window around the playhead when there is no selection. Short regions use a windowed FFT and long regions use deterministic Welch averaging.
 
 ## Export
 

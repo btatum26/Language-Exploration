@@ -9,6 +9,7 @@ class InteractivePlot(pg.PlotWidget):
     selection_requested = QtCore.Signal(float, float)
     pan_requested = QtCore.Signal(float)
     zoom_requested = QtCore.Signal(float, float)
+    vertical_scroll_requested = QtCore.Signal(int)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None):
         super().__init__(parent)
@@ -72,8 +73,15 @@ class InteractivePlot(pg.PlotWidget):
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
-        factor = 0.8 if event.angleDelta().y() > 0 else 1.25
-        self.zoom_requested.emit(factor, self.time_at(event.position().toPoint()))
+        angle_delta = event.angleDelta().y() or event.angleDelta().x()
+        pixel_delta = event.pixelDelta().y() or event.pixelDelta().x()
+        if event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier:
+            wheel_steps = angle_delta / 120 if angle_delta else pixel_delta / 60
+            view_start, view_end = self.plotItem.vb.viewRange()[0]
+            self.pan_requested.emit(-wheel_steps * (view_end - view_start) * 0.1)
+        else:
+            scroll_pixels = pixel_delta if pixel_delta else round(angle_delta * 2 / 3)
+            self.vertical_scroll_requested.emit(scroll_pixels)
         event.accept()
 
 

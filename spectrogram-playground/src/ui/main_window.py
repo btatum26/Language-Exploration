@@ -61,8 +61,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ruler = TimelineRuler(self.project)
         center_layout.addWidget(self.ruler)
         self.tabs = QtWidgets.QTabWidget()
-        self.waveform = WaveformWorkspace(self.project, self.cache)
-        self.spectrogram = SpectrogramWorkspace(self.project, self.cache)
+        self._lane_heights: dict[UUID, int] = {}
+        self.waveform = WaveformWorkspace(
+            self.project, self.cache, lane_heights=self._lane_heights
+        )
+        self.spectrogram = SpectrogramWorkspace(
+            self.project, self.cache, lane_heights=self._lane_heights
+        )
+        self.waveform.lane_height_changed.connect(self.spectrogram.set_lane_height)
+        self.spectrogram.lane_height_changed.connect(self.waveform.set_lane_height)
         self.fourier = FourierView(self.project, self.cache)
         self.tabs.addTab(self.waveform, "Waveform")
         self.tabs.addTab(self.spectrogram, "Spectrogram")

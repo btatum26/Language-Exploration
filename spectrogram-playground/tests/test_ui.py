@@ -104,6 +104,19 @@ def test_plot_click_updates_shared_playhead(qtbot) -> None:
     assert 0.2 < window.engine.current_time < 0.8
 
 
+def test_left_click_inside_selection_still_moves_playhead(qtbot) -> None:
+    window = make_window(qtbot)
+    track = make_track("first", 1.0)
+    window.add_track(track)
+    window.set_track_selection(track.id, 0.2, 0.8)
+    window.seek(0.0)
+    plot = window.waveform.plots[track.id]
+    qtbot.mouseClick(
+        plot.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=plot.viewport().rect().center()
+    )
+    assert 0.2 < window.engine.current_time < 0.8
+
+
 def test_spectrogram_click_updates_shared_playhead(qtbot) -> None:
     window = make_window(qtbot)
     track = make_track("first", 1.0)
@@ -150,9 +163,7 @@ def test_track_selections_are_independent_and_render_only_on_their_lanes(qtbot) 
     assert np.allclose(window.waveform.regions[first.id].getRegion(), (0.1, 0.3))
     assert np.allclose(window.waveform.regions[second.id].getRegion(), (0.5, 0.8))
     assert window.project.active_track_id == second.id
-    assert np.allclose(
-        (window.project.selection.start, window.project.selection.end), (0.5, 0.8)
-    )
+    assert np.allclose((window.project.selection.start, window.project.selection.end), (0.5, 0.8))
 
 
 def test_copy_paste_and_delete_edit_the_active_track(qtbot) -> None:

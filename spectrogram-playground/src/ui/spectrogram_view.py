@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from dataclasses import replace
 from uuid import UUID
 
@@ -112,12 +113,18 @@ class SpectrogramTask(QtCore.QRunnable):
 class SpectrogramWorkspace(TrackWorkspace):
     analysis_failed = QtCore.Signal(str)
 
-    def __init__(self, project: Project, cache: AnalysisCache, parent=None) -> None:
+    def __init__(
+        self,
+        project: Project,
+        cache: AnalysisCache,
+        parent=None,
+        lane_heights: MutableMapping[UUID, int] | None = None,
+    ) -> None:
         self.cache = cache
         self._tasks: list[SpectrogramTask] = []
         self._images: dict[UUID, pg.ImageItem] = {}
         self._generation = 0
-        super().__init__(project, parent)
+        super().__init__(project, parent, lane_heights)
         self._thread_pool = QtCore.QThreadPool(self)
         self._thread_pool.setMaxThreadCount(1)
 

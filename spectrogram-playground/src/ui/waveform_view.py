@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from uuid import UUID
 
 import pyqtgraph as pg
@@ -48,11 +49,17 @@ class WaveformTask(QtCore.QRunnable):
 class WaveformWorkspace(TrackWorkspace):
     analysis_failed = QtCore.Signal(str)
 
-    def __init__(self, project: Project, cache: AnalysisCache, parent=None) -> None:
+    def __init__(
+        self,
+        project: Project,
+        cache: AnalysisCache,
+        parent=None,
+        lane_heights: MutableMapping[UUID, int] | None = None,
+    ) -> None:
         self.cache = cache
         self._generation = 0
         self._tasks: list[WaveformTask] = []
-        super().__init__(project, parent)
+        super().__init__(project, parent, lane_heights)
         self._thread_pool = QtCore.QThreadPool(self)
         self._thread_pool.setMaxThreadCount(1)
 
