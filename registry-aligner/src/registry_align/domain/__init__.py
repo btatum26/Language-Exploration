@@ -1,0 +1,1 @@
+"""Infrastructure-free domain models."""

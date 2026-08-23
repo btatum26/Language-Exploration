@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://registry-align.local/schemas/validation-output-1.0.json",
+  "title": "Registry Aligner Structured Output",
+  "type": "object",
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "command": {
+      "enum": ["init", "validate", "plan", "doctor", "prepare", "process", "status", "qc", "export"]
+    },
+    "type": {"enum": ["event", "result"]},
+    "status": {"type": "string"},
+    "counts": {"type": "object", "additionalProperties": {"type": "integer"}},
+    "issues": {"type": "array", "items": {"type": "object"}},
+    "entries": {"type": "array", "items": {"type": "object"}}
+  },
+  "additionalProperties": true
+}

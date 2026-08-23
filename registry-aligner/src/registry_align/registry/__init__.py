@@ -1,0 +1,1 @@
+"""Registry adapters and validation."""

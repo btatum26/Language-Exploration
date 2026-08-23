@@ -1,0 +1,47 @@
+schema_version = "1"
+
+[input]
+entries_path = "recordings"
+id_path = "id"
+audio_path = "audio.path"
+transcript_path = "transcript.text"
+language_path = "transcript.language"
+speaker_path = "speaker_id"
+metadata_paths = ["lesson_id", "lesson_number", "category", "target_sound"]
+
+[defaults]
+language = "it"
+
+[audio]
+editor_pcm_mode = "native"
+alignment_sample_rate_hz = 16000
+alignment_channels = 1
+ffmpeg_executable = "ffmpeg"
+ffprobe_executable = "ffprobe"
+
+[text]
+normalizer = "italian"
+unicode_form = "NFC"
+lowercase = true
+
+[alignment]
+backend = "mfa"
+jobs = 4
+continue_on_error = true
+
+[alignment.mfa]
+executable = "mfa"
+model_mode = "auto"
+acoustic_model = "italian_cv"
+dictionary = ".mfa/generated/italian_cv_registry.dict"
+g2p_model = ""
+use_g2p_for_oov = false
+fine_tune = false
+validate_corpus = true
+dialect = ""
+
+[output]
+write_sqlite = true
+write_jsonl = true
+write_textgrids = false
+retain_backend_output = true
