@@ -44,6 +44,8 @@ def build_validation_command(
         "--clean",
         "--overwrite",
     ]
+    if config.mfa.config_path:
+        command.extend(["--config_path", config.mfa.config_path])
     return command
 
 
@@ -68,6 +70,8 @@ def build_align_command(
     ]
     if config.mfa.fine_tune:
         common.append("--fine_tune")
+    if config.mfa.config_path:
+        common.extend(["--config_path", config.mfa.config_path])
     if mode == "hosted":
         if "align_hf" not in capabilities:
             raise ConfigurationError("installed MFA does not support align_hf")

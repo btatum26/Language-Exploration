@@ -31,6 +31,7 @@ continue_on_error = true
 
 [alignment.mfa]
 executable = "mfa"
+config_path = "mfa-wide-beam.yaml"
 model_mode = "auto"
 acoustic_model = "italian_cv"
 dictionary = ".mfa/generated/italian_cv_registry.dict"

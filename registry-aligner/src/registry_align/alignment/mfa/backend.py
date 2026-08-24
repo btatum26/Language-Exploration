@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -44,6 +45,22 @@ class MfaBackend:
         except subprocess.TimeoutExpired as exc:
             raise ProcessingError(f"MFA command timed out: {command[1]}") from exc
 
+    @staticmethod
+    def _installed_model_file(resource_type: str, resource: str) -> Path | None:
+        root_value = os.getenv("MFA_ROOT_DIR")
+        if not root_value:
+            return None
+        directory = Path(root_value) / "pretrained_models" / resource_type
+        try:
+            candidates = sorted(
+                path
+                for path in directory.iterdir()
+                if path.is_file() and (path.name == resource or path.stem == resource)
+            )
+        except OSError:
+            return None
+        return candidates[0] if len(candidates) == 1 else None
+
     def doctor(self) -> BackendDiagnostics:
         if self._diagnostics is not None:
             return self._diagnostics
@@ -75,6 +92,15 @@ class MfaBackend:
         )
         issues: list[Issue] = []
         remediation: list[str] = []
+        if self.config.mfa.config_path and not Path(self.config.mfa.config_path).is_file():
+            issues.append(
+                Issue(
+                    code="MFA_CONFIG_MISSING",
+                    severity=Severity.ERROR,
+                    stage="doctor",
+                    message=f"MFA configuration file is unavailable: {self.config.mfa.config_path}",
+                )
+            )
         if version_result.returncode != 0:
             issues.append(
                 Issue(
@@ -159,8 +185,14 @@ class MfaBackend:
                 fingerprint_source = f"{listed.stdout}\n{listed.stderr}"
             else:
                 fingerprint_source = f"{inspected.stdout}\n{inspected.stderr}"
+            installed_model = self._installed_model_file(resource_type, resource)
+            fingerprint_bytes = (
+                installed_model.read_bytes()
+                if installed_model is not None
+                else fingerprint_source.encode()
+            )
             self._resource_fingerprints[resource_type] = hashlib.sha256(
-                fingerprint_source.encode()
+                fingerprint_bytes
             ).hexdigest()
         self._diagnostics = BackendDiagnostics(
             usable=not any(issue.severity == Severity.ERROR for issue in issues),
@@ -174,11 +206,18 @@ class MfaBackend:
 
     def fingerprint(self) -> str:
         diagnostics = self.doctor()
+        config_path = Path(self.config.mfa.config_path) if self.config.mfa.config_path else None
         payload = {
             "name": self.name,
             "version": diagnostics.version,
             "capabilities": diagnostics.capabilities,
             "model_mode": self.config.mfa.model_mode,
+            "config_path": self.config.mfa.config_path,
+            "config_sha256": (
+                hashlib.sha256(config_path.read_bytes()).hexdigest()
+                if config_path is not None and config_path.is_file()
+                else None
+            ),
             "acoustic_model": self.config.mfa.acoustic_model,
             "dictionary": self.config.mfa.dictionary,
             "g2p_model": self.config.mfa.g2p_model,
@@ -192,10 +231,11 @@ class MfaBackend:
         diagnostics = self.doctor()
         if not diagnostics.usable:
             raise DependencyError("MFA or its configured models are unavailable; run doctor")
-        corpus = workspace / "staging" / "mfa" / "corpus"
+        staging = workspace / "staging" / "mfa" / run_id
+        corpus = staging / "corpus"
         output = workspace / "backend" / "mfa" / run_id
         validation_output = workspace / "backend" / "mfa" / f"{run_id}-validation"
-        temporary = workspace / "staging" / "mfa" / "temporary"
+        temporary = staging / "temporary"
         for directory in (output, validation_output, temporary):
             directory.mkdir(parents=True, exist_ok=True)
         manifest = stage_jobs(jobs, corpus)

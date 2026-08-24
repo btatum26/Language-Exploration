@@ -83,6 +83,7 @@ class TextConfig(StrictModel):
 
 class MfaConfig(StrictModel):
     executable: str = "mfa"
+    config_path: str = ""
     model_mode: Literal["auto", "legacy", "hosted"] = "auto"
     acoustic_model: str = ""
     dictionary: str = ""

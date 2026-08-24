@@ -16,9 +16,13 @@ from registry_align.errors import DependencyError, ProcessingError
 
 def _run_ffmpeg(command: list[str], destination: Path) -> None:
     try:
-        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        completed = subprocess.run(
+            command, capture_output=True, text=True, check=False, timeout=300
+        )
     except (FileNotFoundError, OSError) as exc:
         raise DependencyError(f"required FFmpeg executable is unavailable: {command[0]}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ProcessingError(f"FFmpeg timed out creating {destination.name}") from exc
     if completed.returncode != 0:
         raise ProcessingError(
             f"FFmpeg failed creating {destination.name}: {completed.stderr.strip()}"
@@ -59,20 +63,48 @@ def prepare_recording(
         "-map",
         "0:a:0",
     ]
-    _atomic_ffmpeg(canonical_path, prefix, ["-c:a", "pcm_s16le"])
-    _atomic_ffmpeg(
-        alignment_path,
-        prefix,
-        [
-            "-ac",
-            str(config.alignment_channels),
-            "-ar",
-            str(config.alignment_sample_rate_hz),
-            "-c:a",
-            "pcm_s16le",
-        ],
-    )
-    canonical_probe = probe_audio(canonical_path, config.ffprobe_executable)
+    canonical_probe = None
+    if canonical_path.is_file():
+        try:
+            candidate = probe_audio(canonical_path, config.ffprobe_executable)
+            if (
+                candidate.codec == "pcm_s16le"
+                and candidate.sample_rate_hz == source_probe.sample_rate_hz
+                and candidate.channels == source_probe.channels
+            ):
+                canonical_probe = candidate
+        except ProcessingError:
+            pass
+    if canonical_probe is None:
+        _atomic_ffmpeg(canonical_path, prefix, ["-c:a", "pcm_s16le"])
+        canonical_probe = probe_audio(canonical_path, config.ffprobe_executable)
+
+    alignment_probe = None
+    if alignment_path.is_file():
+        try:
+            candidate = probe_audio(alignment_path, config.ffprobe_executable)
+            if (
+                candidate.codec == "pcm_s16le"
+                and candidate.sample_rate_hz == config.alignment_sample_rate_hz
+                and candidate.channels == config.alignment_channels
+            ):
+                alignment_probe = candidate
+        except ProcessingError:
+            pass
+    if alignment_probe is None:
+        _atomic_ffmpeg(
+            alignment_path,
+            prefix,
+            [
+                "-ac",
+                str(config.alignment_channels),
+                "-ar",
+                str(config.alignment_sample_rate_hz),
+                "-c:a",
+                "pcm_s16le",
+            ],
+        )
+        alignment_probe = probe_audio(alignment_path, config.ffprobe_executable)
     frame_count = canonical_probe.frame_count or round(
         canonical_probe.duration_s * canonical_probe.sample_rate_hz
     )

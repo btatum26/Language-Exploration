@@ -14,6 +14,7 @@ def test_builds_legacy_argument_array() -> None:
     config = AlignmentConfig(
         jobs=3,
         mfa=MfaConfig(
+            config_path="mfa.yaml",
             acoustic_model="italian_mfa",
             dictionary="italian_mfa",
             g2p_model="italian_mfa",
@@ -35,6 +36,7 @@ def test_builds_legacy_argument_array() -> None:
     ]
     assert "--output_format" in command
     assert command[-2:] == ["--g2p_model_path", "italian_mfa"]
+    assert command[command.index("--config_path") + 1] == "mfa.yaml"
 
 
 def test_builds_hosted_argument_array_without_dictionary(tmp_path: Path) -> None:
@@ -52,7 +54,9 @@ def test_builds_hosted_argument_array_without_dictionary(tmp_path: Path) -> None
 
 
 def test_validation_command_is_explicit_and_legacy_only() -> None:
-    legacy = AlignmentConfig(mfa=MfaConfig(acoustic_model="italian", dictionary="italian"))
+    legacy = AlignmentConfig(
+        mfa=MfaConfig(config_path="mfa.yaml", acoustic_model="italian", dictionary="italian")
+    )
     hosted = AlignmentConfig(
         mfa=MfaConfig(model_mode="hosted", acoustic_model="local", dictionary="")
     )
@@ -63,6 +67,7 @@ def test_validation_command_is_explicit_and_legacy_only() -> None:
 
     assert command is not None
     assert command[:4] == ["mfa", "validate", "corpus", "italian"]
+    assert command[-2:] == ["--config_path", "mfa.yaml"]
     assert (
         build_validation_command("mfa", Path("corpus"), Path("validation"), Path("temp"), hosted)
         is None

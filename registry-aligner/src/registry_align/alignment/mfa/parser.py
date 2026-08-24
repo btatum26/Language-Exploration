@@ -31,14 +31,16 @@ def _tier_entries(payload: dict[str, Any]) -> dict[str, list[list[Any]]]:
     raise ProcessingError("MFA JSON output has no supported tiers object")
 
 
-def _find_output(output_directory: Path, item: StagingEntry) -> Path:
+def _find_output(output_directory: Path, item: StagingEntry) -> Path | None:
     relative = Path(*item.relative_stem.split("/"))
     direct = output_directory / relative.with_suffix(".json")
     if direct.exists():
         return direct
     matches = list(output_directory.rglob(f"{relative.name}.json"))
-    if len(matches) != 1:
-        raise ProcessingError(f"MFA output missing or ambiguous for {item.recording_id}")
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise ProcessingError(f"MFA output is ambiguous for {item.recording_id}")
     return matches[0]
 
 
@@ -48,7 +50,10 @@ def _canonical_bounds(start_s: float, end_s: float, job: AlignmentJob) -> tuple[
     if start < 0 or end <= start:
         raise ProcessingError(f"invalid MFA interval for {job.entry.id}: {start_s}..{end_s}")
     if end > job.prepared.canonical_frame_count:
-        if end - job.prepared.canonical_frame_count <= 1:
+        # MFA's JSON timestamps are rounded to milliseconds. At native editor rates,
+        # that can put the final interval several samples beyond the exact WAV frame count.
+        rounding_tolerance = max(1, (job.prepared.canonical_sample_rate_hz + 999) // 1000)
+        if end - job.prepared.canonical_frame_count <= rounding_tolerance:
             end = job.prepared.canonical_frame_count
         else:
             raise ProcessingError(f"MFA interval exceeds audio duration for {job.entry.id}")
@@ -67,6 +72,8 @@ def parse_results(
     for manifest_item in manifest:
         job = jobs_by_id[manifest_item.recording_id]
         path = _find_output(output_directory, manifest_item)
+        if path is None:
+            continue
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             tiers = _tier_entries(payload)

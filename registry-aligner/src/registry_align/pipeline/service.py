@@ -493,7 +493,7 @@ class AlignmentService:
             raise ProcessingError(f"alignment database does not exist: {repository.path}")
         recordings = repository.effective_recordings()
         segments = repository.effective_segments()
-        issues = repository.all_issues()
+        issues = repository.effective_issues()
         locations: list[str] = []
         if "jsonl" in formats:
             locations.extend(

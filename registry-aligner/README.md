@@ -42,6 +42,9 @@ pixi run models
 pixi run doctor
 ```
 
+The included MFA profile uses the wider search beam required by the two fastest number-list
+recordings in this registry.
+
 The project also retains its `uv` metadata for Python-only development, but `uv` alone cannot
 provide MFA's native Kaldi runtime on Windows. Use Pixi for actual alignment.
 

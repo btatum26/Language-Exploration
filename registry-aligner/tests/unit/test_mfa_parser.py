@@ -17,15 +17,15 @@ def test_parses_praatio_json_to_canonical_segments(tmp_path: Path) -> None:
         json.dumps(
             {
                 "start": 0.0,
-                "end": 1.0,
+                "end": 1.00004,
                 "tiers": {
                     "speaker - words": {
                         "type": "IntervalTier",
-                        "entries": [[0.0, 0.1, ""], [0.1, 0.9, "ciao"]],
+                        "entries": [[0.0, 0.1, ""], [0.1, 1.00004, "ciao"]],
                     },
                     "speaker - phones": {
                         "type": "IntervalTier",
-                        "entries": [[0.1, 0.5, "tʃ"], [0.5, 0.9, "ao"]],
+                        "entries": [[0.1, 0.5, "tʃ"], [0.5, 1.00004, "ao"]],
                     },
                 },
             }
@@ -56,9 +56,9 @@ def test_parses_praatio_json_to_canonical_segments(tmp_path: Path) -> None:
         source_duration_s=1.0,
         canonical_pcm_path=canonical,
         canonical_pcm_sha256="b" * 64,
-        canonical_sample_rate_hz=1000,
+        canonical_sample_rate_hz=44100,
         canonical_channels=1,
-        canonical_frame_count=1000,
+        canonical_frame_count=44100,
         alignment_audio_path=aligned,
         alignment_audio_sha256="c" * 64,
         alignment_sample_rate_hz=1000,
@@ -87,3 +87,52 @@ def test_parses_praatio_json_to_canonical_segments(tmp_path: Path) -> None:
     assert result[2].source_token_ids == ("one:source-token:000000",)
     assert result[3].parent_segment_id == result[2].segment_id
     assert result[3].confidence is None
+    assert result[-1].end_sample == 44100
+
+
+def test_omits_recording_when_mfa_produces_no_output(tmp_path: Path) -> None:
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"source")
+    prepared = PreparedRecording(
+        recording_id="one",
+        source_audio_sha256="a" * 64,
+        source_codec="wav",
+        source_sample_rate_hz=16000,
+        source_channels=1,
+        source_duration_s=1.0,
+        canonical_pcm_path=source,
+        canonical_pcm_sha256="b" * 64,
+        canonical_sample_rate_hz=16000,
+        canonical_channels=1,
+        canonical_frame_count=16000,
+        alignment_audio_path=source,
+        alignment_audio_sha256="c" * 64,
+        alignment_sample_rate_hz=16000,
+        alignment_channels=1,
+        decoder_name="fake",
+        decoder_version="1",
+    )
+    entry = RegistryEntry(
+        id="one",
+        source_entry_index=0,
+        source_registry_path=tmp_path / "registry.json",
+        audio_relative_path="source.wav",
+        audio_resolved_path=source,
+        transcript_raw="ciao",
+        language="it",
+    )
+    job = AlignmentJob(
+        entry=entry,
+        prepared=prepared,
+        transcript=normalize_transcript("one", "ciao", profile="italian"),
+    )
+
+    result = parse_results(
+        tmp_path / "missing-output",
+        (StagingEntry("one", "speaker/entry"),),
+        (job,),
+        "run_test",
+        "italian",
+    )
+
+    assert result == {}
