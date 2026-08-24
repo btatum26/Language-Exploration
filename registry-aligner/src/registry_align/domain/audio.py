@@ -14,6 +14,7 @@ class PreparedRecording(BaseModel):
     source_sample_rate_hz: int = Field(gt=0)
     source_channels: int = Field(gt=0)
     source_duration_s: float = Field(gt=0)
+    source_frame_count: int | None = Field(default=None, gt=0)
     canonical_pcm_path: Path
     canonical_pcm_sha256: str
     canonical_sample_rate_hz: int = Field(gt=0)
@@ -25,3 +26,4 @@ class PreparedRecording(BaseModel):
     alignment_channels: int = Field(gt=0)
     decoder_name: str
     decoder_version: str
+    preparation_fingerprint: str = "unspecified"

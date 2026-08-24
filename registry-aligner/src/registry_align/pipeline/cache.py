@@ -1,38 +1,59 @@
-"""Stable pipeline cache fingerprints."""
+"""Deterministic fingerprints for immutable content and processing state."""
+
+from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 
 from registry_align.config import AppConfig
+from registry_align.domain.entries import RegistryEntry
 from registry_align.domain.transcripts import NormalizedTranscript
 
-PIPELINE_VERSION = "1"
+
+def fingerprint(payload: Any) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def config_fingerprint(config: AppConfig) -> str:
-    payload = config.model_dump(mode="json")
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    return fingerprint(config.model_dump(mode="json"))
 
 
-def recording_cache_key(
+def content_fingerprint(
+    entry: RegistryEntry,
     source_audio_sha256: str,
     transcript: NormalizedTranscript,
-    config: AppConfig,
-    ffmpeg_version: str,
-    backend_fingerprint: str,
 ) -> str:
-    payload = {
-        "source_audio_sha256": source_audio_sha256,
-        "raw_transcript_sha256": transcript.raw_sha256,
-        "normalizer": {
-            "name": transcript.normalizer_name,
-            "version": transcript.normalizer_version,
-            "config": config.text.model_dump(mode="json"),
-        },
-        "audio": config.audio.model_dump(mode="json"),
-        "ffmpeg_version": ffmpeg_version,
-        "backend_fingerprint": backend_fingerprint,
-        "pipeline_version": PIPELINE_VERSION,
-        "schema_version": config.schema_version,
-    }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    return fingerprint(
+        {
+            "audio_sha256": source_audio_sha256,
+            "raw_transcript_sha256": transcript.raw_sha256,
+            "language": entry.language,
+            "speaker_id": entry.speaker_id,
+            "metadata": entry.metadata,
+        }
+    )
+
+
+def processing_fingerprint(
+    *,
+    backend_fingerprint: str,
+    normalizer_identity: str,
+    audio_profile: str,
+    pipeline_version: str,
+) -> str:
+    return fingerprint(
+        {
+            "backend": backend_fingerprint,
+            "normalizer": normalizer_identity,
+            "audio_profile": audio_profile,
+            "pipeline_version": pipeline_version,
+        }
+    )

@@ -1,6 +1,7 @@
 """Backend-independent interval and revision models."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -36,6 +37,22 @@ class AlignmentSegment(BaseModel):
         return self
 
 
+class SegmentReplacement(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    segment_id: str
+    label: str
+    start_sample: int = Field(ge=0)
+    end_sample: int = Field(gt=0)
+    parent_segment_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> "SegmentReplacement":
+        if self.end_sample <= self.start_sample:
+            raise ValueError("replacement end must be greater than start")
+        return self
+
+
 class SegmentRevision(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -49,3 +66,6 @@ class SegmentRevision(BaseModel):
     author: str | None = None
     created_at: datetime
     reason: str | None = None
+    operation: Literal["update", "split", "merge"] = "update"
+    affected_segment_ids: tuple[str, ...] = ()
+    replacement_segments: tuple[SegmentReplacement, ...] = ()

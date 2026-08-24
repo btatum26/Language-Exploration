@@ -26,13 +26,15 @@ class RegistryReadError(RegistryAlignError):
     exit_code = ExitCode.INPUT_FAILURE
 
 
-class InitializationError(RegistryAlignError):
-    exit_code = ExitCode.INPUT_FAILURE
-
-
 class DependencyError(RegistryAlignError):
     exit_code = ExitCode.DEPENDENCY_FAILURE
 
 
 class ProcessingError(RegistryAlignError):
     exit_code = ExitCode.PROCESSING_FAILURE
+
+
+class DatabaseError(RegistryAlignError):
+    """Database connectivity, transaction, or schema failure."""
+
+    exit_code = ExitCode.DEPENDENCY_FAILURE

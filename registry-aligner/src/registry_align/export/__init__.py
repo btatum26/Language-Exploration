@@ -1,1 +1,1 @@
-"""Portable exports from canonical SQLite records."""
+"""Portable exports from effective PostgreSQL-backed alignments."""

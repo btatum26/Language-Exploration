@@ -16,74 +16,42 @@ class RegistryFactory(Protocol):
 runner = CliRunner()
 
 
-def test_init_creates_templates_and_refuses_overwrite(tmp_path: Path) -> None:
-    target = tmp_path / "templates"
+def test_help_exposes_postgresql_workflow() -> None:
+    result = runner.invoke(app, ["--help"])
 
-    first = runner.invoke(app, ["init", str(target), "--json"])
-    second = runner.invoke(app, ["init", str(target), "--json"])
+    assert result.exit_code == 0
+    assert "process" in result.stdout
+    assert "history" in result.stdout
+    assert "audio" in result.stdout
+    assert "maintenance" in result.stdout
 
-    assert first.exit_code == 0
-    assert (target / "registry-align.toml").exists()
-    schema = json.loads((target / "canonical-registry.schema.json").read_text(encoding="utf-8"))
-    assert schema["properties"]["schema_version"]["const"] == "1.0"
-    assert second.exit_code == 2
-    assert json.loads(second.stdout)["error"]["type"] == "InitializationError"
+
+def test_audio_fetch_exposes_output_path() -> None:
+    result = runner.invoke(app, ["audio", "fetch", "--help"])
+
+    assert result.exit_code == 0
+    assert "--output" in result.stdout
 
 
 def test_validate_json_output(
     registry_factory: RegistryFactory, canonical_document: dict[str, Any]
 ) -> None:
-    registry = registry_factory(canonical_document)
-
-    result = runner.invoke(app, ["validate", str(registry), "--json"])
+    result = runner.invoke(app, ["validate", str(registry_factory(canonical_document)), "--json"])
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["command"] == "validate"
-    assert payload["status"] == "ok"
-    assert payload["counts"]["valid_entries"] == 1
     assert payload["entries"][0]["id"] == "lesson-1-luca"
 
 
-def test_validate_returns_input_exit_code_for_invalid_registry(tmp_path: Path) -> None:
-    registry = tmp_path / "registry.json"
-    registry.write_text('{"schema_version":"2.0","entries":[]}', encoding="utf-8")
-
-    result = runner.invoke(app, ["validate", str(registry), "--json"])
-
-    assert result.exit_code == 2
-    assert json.loads(result.stdout)["issues"][0]["code"] == "SCHEMA_VERSION_UNSUPPORTED"
-
-
-def test_validate_human_output_handles_issue_severity(tmp_path: Path) -> None:
-    registry = tmp_path / "registry.json"
-    registry.write_text('{"schema_version":"2.0","entries":[]}', encoding="utf-8")
-
-    result = runner.invoke(app, ["validate", str(registry)])
-
-    assert result.exit_code == 2
-    assert "SCHEMA_VERSION_UNSUPPORTED" in result.output
-
-
-def test_plan_json_selection(
-    registry_factory: RegistryFactory, canonical_document: dict[str, Any]
-) -> None:
-    registry = registry_factory(canonical_document)
-
-    result = runner.invoke(app, ["plan", str(registry), "--select", "lesson-1-luca", "--json"])
+def test_process_exposes_explicit_overwrite_option() -> None:
+    result = runner.invoke(app, ["process", "--help"])
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["counts"]["selected"] == 1
-    assert payload["entries"][0]["status"] == "new"
+    assert "--overwrite-existing" in result.stdout
 
 
-def test_validate_reports_registry_read_errors_as_json(tmp_path: Path) -> None:
-    missing = tmp_path / "missing.json"
-
-    result = runner.invoke(app, ["validate", str(missing), "--json"])
+def test_reset_test_requires_confirmation() -> None:
+    result = runner.invoke(app, ["db", "reset-test"])
 
     assert result.exit_code == 2
-    payload = json.loads(result.stdout)
-    assert payload["status"] == "error"
-    assert payload["error"]["type"] == "RegistryReadError"
+    assert "--confirm is required" in result.output

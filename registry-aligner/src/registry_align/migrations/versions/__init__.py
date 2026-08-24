@@ -1,0 +1,1 @@
+"""Registry Aligner schema revisions."""

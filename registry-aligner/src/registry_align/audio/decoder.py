@@ -48,9 +48,8 @@ def prepare_recording(
 ) -> PreparedRecording:
     source_probe = probe_audio(entry.audio_resolved_path, config.ffprobe_executable)
     source_hash = sha256_file(entry.audio_resolved_path)
-    safe_name = f"{entry.source_entry_index:06d}-{source_hash[:16]}"
-    canonical_path = output_directory / "derived" / "pcm" / f"{safe_name}.wav"
-    alignment_path = output_directory / "derived" / "alignment-audio" / f"{safe_name}.wav"
+    canonical_path = output_directory / "canonical.wav"
+    alignment_path = output_directory / "alignment.wav"
     prefix = [
         config.ffmpeg_executable,
         "-nostdin",
@@ -115,6 +114,7 @@ def prepare_recording(
         source_sample_rate_hz=source_probe.sample_rate_hz,
         source_channels=source_probe.channels,
         source_duration_s=source_probe.duration_s,
+        source_frame_count=source_probe.frame_count,
         canonical_pcm_path=canonical_path,
         canonical_pcm_sha256=sha256_file(canonical_path),
         canonical_sample_rate_hz=canonical_probe.sample_rate_hz,

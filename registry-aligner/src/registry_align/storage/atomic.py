@@ -21,9 +21,9 @@ def atomic_write_text(path: Path, content: str) -> None:
 
 
 def atomic_write_json(path: Path, payload: Any) -> None:
-    atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n")
 
 
 def atomic_write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
-    content = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+    content = "".join(json.dumps(row, ensure_ascii=False, default=str) + "\n" for row in rows)
     atomic_write_text(path, content)

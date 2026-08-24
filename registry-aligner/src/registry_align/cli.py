@@ -1,4 +1,4 @@
-"""Thin Typer shell over :class:`AlignmentService`."""
+"""Typer CLI; all pipeline behavior remains in AlignmentService."""
 
 from __future__ import annotations
 
@@ -11,449 +11,270 @@ from rich.console import Console
 from rich.table import Table
 
 from registry_align.alignment.mfa.dictionary import build_italian_dictionary
-from registry_align.config import load_config
-from registry_align.domain.runs import ProcessRequest, ProcessResult
-from registry_align.errors import ConfigurationError, ExitCode, RegistryAlignError
-from registry_align.events import Event, EventObserver, Issue
+from registry_align.domain.runs import ProcessRequest
+from registry_align.errors import RegistryAlignError
 from registry_align.pipeline.service import AlignmentService
 
-app = typer.Typer(no_args_is_help=True, help="Prepare and align JSON recording registries.")
+app = typer.Typer(no_args_is_help=True, pretty_exceptions_show_locals=False)
+db_app = typer.Typer(no_args_is_help=True)
+cache_app = typer.Typer(no_args_is_help=True)
+maintenance_app = typer.Typer(no_args_is_help=True)
+audio_app = typer.Typer(no_args_is_help=True)
+app.add_typer(db_app, name="db")
+app.add_typer(cache_app, name="cache")
+app.add_typer(maintenance_app, name="maintenance")
+app.add_typer(audio_app, name="audio")
 console = Console()
 error_console = Console(stderr=True)
 
 
-def _dump_json(payload: dict[str, Any]) -> None:
-    typer.echo(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+def _service(config: Path | None) -> AlignmentService:
+    return AlignmentService.from_config(config)
 
 
-def _issue_payload(issue: Issue) -> dict[str, Any]:
-    return issue.model_dump(mode="json", exclude_none=True)
+def _json(value: Any) -> None:
+    typer.echo(json.dumps(value, ensure_ascii=False, default=str, sort_keys=True))
 
 
-def _print_issue(issue: Issue) -> None:
-    location = (
-        f" entry {issue.details['source_entry_index']}"
-        if "source_entry_index" in issue.details
-        else ""
-    )
-    style = "red" if issue.severity == "error" else "yellow"
-    error_console.print(
-        f"{issue.severity.value.upper()} {issue.code}{location}: {issue.message}", style=style
-    )
-
-
-def _fail(error: RegistryAlignError, *, json_output: bool) -> None:
-    if json_output:
-        _dump_json(
-            {
-                "schema_version": "1.0",
-                "status": "error",
-                "error": {"type": type(error).__name__, "message": str(error)},
-                "exit_code": int(error.exit_code),
-            }
-        )
-    else:
-        error_console.print(f"[red]Error:[/red] {error}")
-    raise typer.Exit(code=int(error.exit_code))
-
-
-class CliObserver(EventObserver):
-    def __init__(self, *, json_output: bool, quiet: bool = False) -> None:
-        self.json_output = json_output
-        self.quiet = quiet
-
-    def on_event(self, event: Event) -> None:
-        if self.quiet:
-            return
-        if self.json_output:
-            _dump_json(
-                {
-                    "schema_version": "1.0",
-                    "type": "event",
-                    **event.model_dump(mode="json", exclude_none=True),
-                }
-            )
-        elif event.recording_id:
-            console.print(f"{event.name}: {event.recording_id} {event.status or ''}".rstrip())
+def _run(action: Any, *, json_output: bool) -> Any:
+    try:
+        return action()
+    except RegistryAlignError as exc:
+        if json_output:
+            _json({"status": "error", "message": str(exc), "exit_code": int(exc.exit_code)})
         else:
-            console.print(f"{event.name}: {event.status or ''}".rstrip())
-
-
-def _default_output(registry: Path) -> Path:
-    return registry.parent / f"{registry.stem}.alignment"
-
-
-def _configure_service(
-    config: Path | None,
-    *,
-    jobs: int | None,
-    continue_on_error: bool,
-    observer: EventObserver | None = None,
-) -> AlignmentService:
-    service = AlignmentService.from_config(config, observer=observer)
-    alignment = service.config.alignment.model_copy(
-        update={
-            "jobs": jobs if jobs is not None else service.config.alignment.jobs,
-            "continue_on_error": continue_on_error,
-        }
-    )
-    service.config = service.config.model_copy(update={"alignment": alignment})
-    return service
-
-
-def _process_payload(command: str, result: ProcessResult) -> dict[str, Any]:
-    return {
-        "schema_version": "1.0",
-        "type": "result",
-        "command": command,
-        **result.model_dump(mode="json", exclude_none=True),
-    }
-
-
-def _finish_process(command: str, result: ProcessResult, *, json_output: bool) -> None:
-    if json_output:
-        _dump_json(_process_payload(command, result))
-    else:
-        console.print(f"{command} {result.status}: {result.run_id}")
-        console.print(" ".join(f"{key}={value}" for key, value in result.counts.items()))
-        for issue in result.issues:
-            _print_issue(issue)
-    if result.status == "partial":
-        raise typer.Exit(code=int(ExitCode.PARTIAL_SUCCESS))
-    if result.status == "failed":
-        raise typer.Exit(code=int(ExitCode.PROCESSING_FAILURE))
-
-
-@app.command("init")
-def initialize(
-    directory: Annotated[Path, typer.Argument(help="Directory receiving template files.")] = Path(
-        "."
-    ),
-    force: Annotated[
-        bool, typer.Option("--force", help="Overwrite existing template files.")
-    ] = False,
-    json_output: Annotated[
-        bool, typer.Option("--json", help="Emit one structured JSON result.")
-    ] = False,
-) -> None:
-    try:
-        config_path, schema_path = AlignmentService.initialize(directory, force=force)
-    except RegistryAlignError as exc:
-        _fail(exc, json_output=json_output)
-    if json_output:
-        _dump_json(
-            {
-                "schema_version": "1.0",
-                "command": "init",
-                "status": "ok",
-                "files": [str(config_path), str(schema_path)],
-            }
-        )
-    else:
-        console.print(f"Created {config_path}")
-        console.print(f"Created {schema_path}")
-
-
-@app.command("validate")
-def validate(
-    registry: Annotated[Path, typer.Argument(exists=False, dir_okay=False)],
-    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
-    fail_fast: Annotated[
-        bool, typer.Option("--fail-fast", help="Stop after the first bad entry.")
-    ] = False,
-    json_output: Annotated[
-        bool, typer.Option("--json", help="Emit one structured JSON result.")
-    ] = False,
-) -> None:
-    try:
-        result = AlignmentService.from_config(config).validate_registry(
-            registry, fail_fast=fail_fast
-        )
-    except RegistryAlignError as exc:
-        _fail(exc, json_output=json_output)
-    payload = {
-        "schema_version": "1.0",
-        "command": "validate",
-        "status": "ok" if result.is_valid else "invalid",
-        "counts": {
-            "valid_entries": len(result.entries),
-            "issues": len(result.issues),
-            "errors": result.error_count,
-        },
-        "issues": [_issue_payload(issue) for issue in result.issues],
-        "entries": [
-            {
-                "id": entry.id,
-                "source_entry_index": entry.source_entry_index,
-                "audio_relative_path": entry.audio_relative_path,
-                "language": entry.language,
-                "id_was_derived": entry.id_was_derived,
-            }
-            for entry in result.entries
-        ],
-    }
-    if json_output:
-        _dump_json(payload)
-    else:
-        console.print(f"Validated {len(result.entries)} entries; {result.error_count} error(s).")
-        for issue in result.issues:
-            _print_issue(issue)
-    if not result.is_valid:
-        raise typer.Exit(code=int(ExitCode.INPUT_FAILURE))
-
-
-@app.command("plan")
-def plan(
-    registry: Annotated[Path, typer.Argument(exists=False, dir_okay=False)],
-    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
-    select: Annotated[
-        list[str] | None, typer.Option("--select", help="Select a recording ID; repeatable.")
-    ] = None,
-    fail_fast: Annotated[bool, typer.Option("--fail-fast")] = False,
-    json_output: Annotated[
-        bool, typer.Option("--json", help="Emit one structured JSON result.")
-    ] = False,
-) -> None:
-    try:
-        result = AlignmentService.from_config(config).plan(
-            registry, selected_ids=tuple(select or ()), fail_fast=fail_fast
-        )
-    except RegistryAlignError as exc:
-        _fail(exc, json_output=json_output)
-    payload = {
-        "schema_version": "1.0",
-        "command": "plan",
-        "status": "ok" if result.is_valid else "invalid",
-        "counts": result.counts,
-        "issues": [_issue_payload(issue) for issue in result.issues],
-        "entries": [item.model_dump(mode="json") for item in result.items],
-    }
-    if json_output:
-        _dump_json(payload)
-    else:
-        table = Table(title="Registry plan")
-        table.add_column("Recording")
-        table.add_column("Status")
-        table.add_column("Language")
-        table.add_column("Audio")
-        for item in result.items:
-            table.add_row(item.recording_id, item.status, item.language, item.audio_relative_path)
-        console.print(table)
-        console.print(" ".join(f"{key}={value}" for key, value in result.counts.items()))
-        for issue in result.issues:
-            _print_issue(issue)
-    if not result.is_valid:
-        raise typer.Exit(code=int(ExitCode.INPUT_FAILURE))
+            error_console.print(str(exc))
+        raise typer.Exit(code=int(exc.exit_code)) from exc
 
 
 @app.command("doctor")
 def doctor(
     config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
-    output: Annotated[Path | None, typer.Option("--output", file_okay=False)] = None,
+    registry: Annotated[Path | None, typer.Option("--registry", dir_okay=False)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    try:
-        result = AlignmentService.from_config(config).doctor(output)
-    except RegistryAlignError as exc:
-        _fail(exc, json_output=json_output)
+    result = _run(lambda: _service(config).doctor(registry), json_output=json_output)
     if json_output:
-        _dump_json({"command": "doctor", **result})
+        _json(result)
     else:
         for name, check in result["checks"].items():
             console.print(f"{name}: {'ok' if check.get('usable') else 'unavailable'}")
-            if check.get("message"):
-                error_console.print(str(check["message"]))
-            for command in check.get("remediation_commands", ()):
-                error_console.print(f"Run: {command}")
-        console.print(f"usable={result['usable']}")
+            if message := check.get("message"):
+                error_console.print(message)
     if not result["usable"]:
-        raise typer.Exit(code=int(ExitCode.DEPENDENCY_FAILURE))
+        raise typer.Exit(code=3)
+
+
+@db_app.command("check")
+def db_check(
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: _service(config).db_check(), json_output=json_output)
+    _json(result) if json_output else console.print(result)
+
+
+@db_app.command("upgrade")
+def db_upgrade(
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: _service(config).db_upgrade(), json_output=json_output)
+    _json(result) if json_output else console.print(f"database revision: {result['current']}")
+
+
+@db_app.command("create-dev")
+def db_create_dev(
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
+) -> None:
+    name = _run(lambda: _service(config).db_create_development(), json_output=False)
+    console.print(f"development database ready: {name}")
+
+
+@db_app.command("reset-test")
+def db_reset_test(
+    confirm: Annotated[bool, typer.Option("--confirm")] = False,
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
+) -> None:
+    if not confirm:
+        error_console.print("--confirm is required; only databases ending in `_test` are eligible")
+        raise typer.Exit(code=2)
+    result = _run(lambda: _service(config).db_reset_test(), json_output=False)
+    console.print(f"test database reset to revision {result['current']}")
+
+
+@app.command("validate")
+def validate(
+    registry: Annotated[Path, typer.Argument(dir_okay=False)],
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: _service(config).validate_registry(registry), json_output=json_output)
+    payload = result.model_dump(mode="json")
+    _json(payload) if json_output else console.print(
+        f"valid={result.is_valid} entries={len(result.entries)} issues={len(result.issues)}"
+    )
+    if not result.is_valid:
+        raise typer.Exit(code=2)
 
 
 @app.command("build-italian-dictionary")
-def build_italian_dictionary_command(
-    registry: Annotated[Path, typer.Argument(exists=False, dir_okay=False)],
-    base_dictionary: Annotated[
-        Path, typer.Option("--base-dictionary", exists=False, dir_okay=False)
-    ],
+def build_dictionary(
+    registry: Annotated[Path, typer.Argument(dir_okay=False)],
+    base_dictionary: Annotated[Path, typer.Option("--base-dictionary", dir_okay=False)],
     output: Annotated[Path, typer.Option("--output", dir_okay=False)],
     config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    try:
-        result = build_italian_dictionary(
-            registry,
-            base_dictionary,
-            output,
-            load_config(config),
-        )
-    except RegistryAlignError as exc:
-        _fail(exc, json_output=json_output)
-    counts = {
+    result = _run(
+        lambda: build_italian_dictionary(
+            registry, base_dictionary, output, _service(config).config
+        ),
+        json_output=json_output,
+    )
+    payload = {
+        "output": str(result.output_path),
         "vocabulary_words": result.vocabulary_words,
         "added_words": result.added_words,
         "added_pronunciations": result.added_pronunciations,
     }
-    payload = {
-        "schema_version": "1.0",
-        "command": "build-italian-dictionary",
-        "status": "ok",
-        "output": str(result.output_path),
-        "counts": counts,
-    }
-    if json_output:
-        _dump_json(payload)
-    else:
-        console.print(f"Built {result.output_path}")
-        console.print(" ".join(f"{key}={value}" for key, value in counts.items()))
+    _json(payload) if json_output else console.print(payload)
 
 
-def _run_pipeline(
-    command: str,
-    registry: Path,
-    config: Path | None,
-    output: Path | None,
-    jobs: int | None,
-    resume: bool,
-    force: bool,
-    continue_on_error: bool,
-    select: list[str] | None,
-    json_output: bool,
-    quiet: bool,
-) -> None:
-    observer = CliObserver(json_output=json_output, quiet=quiet)
-    try:
-        service = _configure_service(
-            config,
-            jobs=jobs,
-            continue_on_error=continue_on_error,
-            observer=observer,
-        )
-        request = ProcessRequest(
-            registry_path=registry,
-            output_directory=output or _default_output(registry),
-            resume=resume,
-            force=force,
-            selected_ids=tuple(select or ()),
-        )
-        result = service.prepare(request) if command == "prepare" else service.process(request)
-    except RegistryAlignError as exc:
-        _fail(exc, json_output=json_output)
-    _finish_process(command, result, json_output=json_output)
-
-
-@app.command("prepare")
-def prepare(
-    registry: Annotated[Path, typer.Argument(exists=False, dir_okay=False)],
+@app.command("plan")
+def plan(
+    registry: Annotated[Path, typer.Argument(dir_okay=False)],
     config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
-    output: Annotated[Path | None, typer.Option("--output", file_okay=False)] = None,
-    jobs: Annotated[int | None, typer.Option("--jobs", min=1)] = None,
-    resume: Annotated[bool, typer.Option("--resume/--no-resume")] = True,
-    force: Annotated[bool, typer.Option("--force")] = False,
-    continue_on_error: Annotated[bool, typer.Option("--continue-on-error/--fail-fast")] = True,
     select: Annotated[list[str] | None, typer.Option("--select")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
-    quiet: Annotated[bool, typer.Option("--quiet")] = False,
 ) -> None:
-    _run_pipeline(
-        "prepare",
-        registry,
-        config,
-        output,
-        jobs,
-        resume,
-        force,
-        continue_on_error,
-        select,
-        json_output,
-        quiet,
+    result = _run(
+        lambda: _service(config).plan(registry, selected_ids=tuple(select or ())),
+        json_output=json_output,
     )
+    if json_output:
+        _json(result.model_dump(mode="json"))
+    else:
+        table = Table("Recording", "Status", "Language", "Audio")
+        for item in result.items:
+            table.add_row(item.recording_id, item.status, item.language, item.audio_relative_path)
+        console.print(table)
+    if not result.is_valid:
+        raise typer.Exit(code=2)
 
 
 @app.command("process")
 def process(
-    registry: Annotated[Path, typer.Argument(exists=False, dir_okay=False)],
+    registry: Annotated[Path, typer.Argument(dir_okay=False)],
+    overwrite_existing: Annotated[bool, typer.Option("--overwrite-existing")] = False,
     config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
-    output: Annotated[Path | None, typer.Option("--output", file_okay=False)] = None,
-    jobs: Annotated[int | None, typer.Option("--jobs", min=1)] = None,
-    resume: Annotated[bool, typer.Option("--resume/--no-resume")] = True,
-    force: Annotated[bool, typer.Option("--force")] = False,
-    continue_on_error: Annotated[bool, typer.Option("--continue-on-error/--fail-fast")] = True,
-    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     select: Annotated[list[str] | None, typer.Option("--select")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
-    quiet: Annotated[bool, typer.Option("--quiet")] = False,
 ) -> None:
-    if dry_run:
-        plan(registry, config, select, not continue_on_error, json_output)
-        return
-    _run_pipeline(
-        "process",
-        registry,
-        config,
-        output,
-        jobs,
-        resume,
-        force,
-        continue_on_error,
-        select,
-        json_output,
-        quiet,
+    request = ProcessRequest(
+        registry_path=registry,
+        overwrite_existing=overwrite_existing,
+        selected_ids=tuple(select or ()),
     )
+    result = _run(lambda: _service(config).process(request), json_output=json_output)
+    if json_output:
+        _json(result.model_dump(mode="json"))
+    else:
+        console.print(f"run={result.run_id} status={result.status}")
+        console.print(" ".join(f"{key}={value}" for key, value in result.counts.items()))
+    if result.status == "failed":
+        raise typer.Exit(code=4)
 
 
 @app.command("status")
 def status(
-    output: Annotated[Path, typer.Argument(file_okay=False)],
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    try:
-        result = AlignmentService.status(output)
-    except RegistryAlignError as exc:
-        _fail(exc, json_output=json_output)
+    result = _run(lambda: _service(config).status(), json_output=json_output)
+    _json(result) if json_output else console.print(result)
+
+
+@app.command("history")
+def history(
+    recording_id: Annotated[str, typer.Argument()],
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: _service(config).history(recording_id), json_output=json_output)
     if json_output:
-        _dump_json({"command": "status", **result})
+        _json(result)
     else:
-        console.print(f"status={result['status']}")
-        console.print(" ".join(f"{key}={value}" for key, value in result["counts"].items()))
+        table = Table("Created", "Current", "Audio SHA-256", "Transcript SHA-256")
+        for item in result:
+            table.add_row(
+                str(item["created_at"]),
+                str(item["is_current"]),
+                str(item["audio_sha256"]),
+                str(item["transcript_sha256"]),
+            )
+        console.print(table)
+
+
+@audio_app.command("fetch")
+def audio_fetch(
+    recording_id: Annotated[str, typer.Argument()],
+    output: Annotated[Path | None, typer.Option("--output", dir_okay=False)] = None,
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(
+        lambda: _service(config).fetch_audio(recording_id, output),
+        json_output=json_output,
+    )
+    _json(result) if json_output else console.print(f"downloaded: {result['path']}")
 
 
 @app.command("qc")
 def qc(
-    output: Annotated[Path, typer.Argument(file_okay=False)],
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    try:
-        result = AlignmentService.qc(output)
-    except RegistryAlignError as exc:
-        _fail(exc, json_output=json_output)
-    if json_output:
-        _dump_json({"command": "qc", **result})
-    else:
-        console.print(f"issues={result['issues']}")
+    result = _run(lambda: _service(config).qc(), json_output=json_output)
+    _json(result) if json_output else console.print(f"issues={len(result)}")
 
 
 @app.command("export")
 def export_command(
-    output: Annotated[Path, typer.Argument(file_okay=False)],
     formats: Annotated[list[str] | None, typer.Option("--format")] = None,
+    output: Annotated[Path | None, typer.Option("--output", file_okay=False)] = None,
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    requested = tuple(formats or ("jsonl",))
+    requested = tuple(formats or _service(config).config.output.formats)
     invalid = set(requested) - {"jsonl", "csv", "textgrid"}
     if invalid:
-        _fail(
-            ConfigurationError(f"unsupported export formats: {sorted(invalid)}"),
-            json_output=json_output,
-        )
-    try:
-        result = AlignmentService.export(output, requested)
-    except RegistryAlignError as exc:
-        _fail(exc, json_output=json_output)
-    if json_output:
-        _dump_json({"command": "export", **result})
-    else:
-        console.print(f"Exported {len(result['files'])} file(s).")
+        error_console.print(f"unsupported formats: {sorted(invalid)}")
+        raise typer.Exit(code=2)
+    result = _run(lambda: _service(config).export(requested, output), json_output=json_output)
+    _json([str(path) for path in result]) if json_output else console.print(
+        f"exported {len(result)} file(s)"
+    )
+
+
+@cache_app.command("status")
+def cache_status(
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: _service(config).cache_status(), json_output=json_output)
+    _json(result) if json_output else console.print(result)
+
+
+@maintenance_app.command("prune-runs")
+def prune_runs(
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    config: Annotated[Path | None, typer.Option("--config", dir_okay=False)] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    result = _run(lambda: _service(config).prune_runs(dry_run=dry_run), json_output=json_output)
+    payload = {"dry_run": dry_run, "run_ids": [str(item) for item in result], "count": len(result)}
+    _json(payload) if json_output else console.print(payload)
 
 
 if __name__ == "__main__":

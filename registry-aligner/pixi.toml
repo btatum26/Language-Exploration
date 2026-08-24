@@ -23,17 +23,18 @@ mypy = ">=1.16,<1.18"
 
 [tasks]
 doctor = "registry-align doctor --config registry-align.example.toml"
+db-upgrade = "registry-align db upgrade --config registry-align.example.toml"
 models = { depends-on = ["dictionary"] }
 download-models = "mfa model download acoustic italian_cv && mfa model download dictionary italian_cv"
 dictionary = { cmd = "registry-align build-italian-dictionary ../recordings/complete_italian_pronunciation_registry/registry.json --config registry-align.example.toml --base-dictionary .mfa/pretrained_models/dictionary/italian_cv.dict --output .mfa/generated/italian_cv_registry.dict", depends-on = ["download-models"] }
 validate = "registry-align validate ../recordings/complete_italian_pronunciation_registry/registry.json --config registry-align.example.toml"
-pilot = "registry-align process ../recordings/complete_italian_pronunciation_registry/registry.json --config registry-align.example.toml --output ../recordings/complete_italian_pronunciation_registry/alignment-output --select it_basics_001_luca --jobs 1 --fail-fast"
-process = "registry-align process ../recordings/complete_italian_pronunciation_registry/registry.json --config registry-align.example.toml --output ../recordings/complete_italian_pronunciation_registry/alignment-output --jobs 4"
-status = "registry-align status ../recordings/complete_italian_pronunciation_registry/alignment-output"
-qc = "registry-align qc ../recordings/complete_italian_pronunciation_registry/alignment-output"
-export = "registry-align export ../recordings/complete_italian_pronunciation_registry/alignment-output --format csv --format textgrid"
+pilot = "registry-align process ../recordings/complete_italian_pronunciation_registry/registry.json --config registry-align.example.toml --select it_basics_001_luca"
+process = "registry-align process ../recordings/complete_italian_pronunciation_registry/registry.json --config registry-align.example.toml"
+status = "registry-align status --config registry-align.example.toml"
+qc = "registry-align qc --config registry-align.example.toml"
+export = "registry-align export --config registry-align.example.toml --format csv --format textgrid"
 test = "pytest -p no:cacheprovider"
 lint = "ruff check ."
 format-check = "ruff format --check ."
-typecheck = "mypy src tests"
+typecheck = "mypy src"
 quality = { depends-on = ["lint", "format-check", "typecheck", "test"] }

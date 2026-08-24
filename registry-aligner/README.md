@@ -1,54 +1,97 @@
 # Registry Aligner
 
-`registry-aligner` is an independent command-line subproject for converting JSON recording
-registries into canonical, backend-independent alignment jobs. It does not import or depend on
-the repository's spectrogram application or Qt.
+`registry-aligner` is an independent Python CLI for ingesting recording registries, preparing
+audio locally, and storing authoritative alignment metadata in PostgreSQL. It has no dependency
+on the repository's spectrogram application or any Qt package.
 
-The implementation covers registry ingestion and the complete processing pipeline:
+## Architecture
 
-- strict TOML configuration models;
-- canonical and dotted-path mapped JSON registries;
-- exact raw transcript preservation;
-- stable UUIDv5 identifiers for mapped entries without IDs;
-- relative-path, traversal, absolute-path, and symlink-containment checks;
-- duplicate ID and normalized-path checks;
-- aggregated human-readable or JSON validation issues;
-- side-effect-free planning with selection support;
-- FFprobe metadata and source hashing;
-- native-rate canonical PCM plus 16 kHz mono alignment derivatives;
-- raw-preserving transcript normalization and token mappings;
-- transactional SQLite migrations and canonical records;
-- version-aware MFA legacy and hosted-model subprocess commands;
-- canonical word, phone, silence, and utterance segments;
-- structural QC, JSONL/CSV/TextGrid exports, manifests, and verified resume caching;
-- `init`, `doctor`, `validate`, `plan`, `prepare`, `process`, `status`, `qc`, and `export` commands.
+```text
+CLI -> AlignmentService
+          |-- MetadataRepository / UnitOfWork -> PostgreSQL
+          |-- AudioObjectStore -> remote content-addressed source audio over SSH/SCP
+          |-- ArtifactStore -> disposable local MFA working files
+          `-- AlignerBackend -> Montreal Forced Aligner
+```
 
-## Setup with Pixi
+PostgreSQL owns logical recordings, immutable timestamped versions, alignment results, segments,
+manual revisions, and compact run history. One exact source-audio object per SHA-256 is retained on
+the SSH server. All versions with the same audio bytes reference the same `audio_assets` row and
+remote object. Native-rate canonical PCM and 16 kHz mono alignment audio are disposable local
+working files. SQLAlchemy objects and connections do not cross the repository boundary.
+
+There is no SQLite backend, SQLite migration, or legacy run-directory import path.
+
+## Setup
+
+Python-only development:
 
 ```powershell
 cd registry-aligner
-pixi install
-pixi run registry-align --help
+uv sync --extra dev
+Copy-Item .env.example .env
+Copy-Item registry-align.example.toml registry-align.toml
 ```
 
-Pixi installs Python, FFmpeg/FFprobe, Montreal Forced Aligner, Kaldi, Epitran, and the Python package into
-one project-local environment. It uses the locked conda-forge packages directly without requiring
-Conda, Miniconda, or environment activation. MFA's model store is kept locally in the ignored
-`.mfa` directory. The model task downloads the Italian CV acoustic model and base dictionary,
-then derives a registry-specific dictionary containing any missing Italian words:
+Put the actual passwords into `REGISTRY_ALIGN_DATABASE_URL` and
+`REGISTRY_ALIGN_DATABASE_ADMIN_URL` in `.env`. Normal operations exclusively use the application
+URL. The admin URL is used only by explicit `db create-dev`, `db upgrade`, and `db reset-test`
+commands. TOML never contains credentials. `.env` is ignored by Git.
+
+For MFA and FFmpeg on Windows, Pixi supplies the native dependencies:
 
 ```powershell
+pixi install
 pixi run models
-pixi run doctor
 ```
 
-The included MFA profile uses the wider search beam required by the two fastest number-list
-recordings in this registry.
+## SSH tunnel and database
 
-The project also retains its `uv` metadata for Python-only development, but `uv` alone cannot
-provide MFA's native Kaldi runtime on Windows. Use Pixi for actual alignment.
+The example configuration inherits the working OpenSSH setup directly:
 
-## Canonical registry
+```text
+ssh -N registry-db
+```
+
+Normal CLI commands start that tunnel without a window, wait for `127.0.0.1:5433`, use the
+PostgreSQL connection, and terminate the tunnel. Port 5433 must be free before a command starts.
+The exact connectivity check is:
+
+```powershell
+uv run registry-align db check --config registry-align.toml
+```
+
+Source audio uses the same `registry-db` alias through `ssh` and `scp`. The durable remote root is:
+
+```text
+~/registry-align/audio/
+```
+
+Each unique source SHA-256 has exactly one extension-independent object key:
+
+```text
+~/registry-align/audio/<sha-prefix>/<source-sha256>
+```
+
+Create a development database (the URL database name must end in `_dev`) and migrate it:
+
+```powershell
+uv run registry-align db create-dev --config registry-align.toml
+uv run registry-align db upgrade --config registry-align.toml
+uv run registry-align db check --config registry-align.toml
+```
+
+The application refuses to process against a missing or old schema. It never drops or recreates
+normal databases. A disposable test database can be reset only when its name ends in `_test`:
+
+```powershell
+$env:REGISTRY_ALIGN_DATABASE_URL = $env:TEST_DATABASE_URL
+uv run registry-align db reset-test --confirm --config registry-align.toml
+```
+
+## Registry format
+
+Canonical input uses stable registry IDs and relative audio paths:
 
 ```json
 {
@@ -58,7 +101,7 @@ provide MFA's native Kaldi runtime on Windows. Use Pixi for actual alignment.
     {
       "id": "it_basics_001_luca",
       "audio_path": "audio/luca/001.wav",
-      "transcript": "lidi, visti, finí",
+      "transcript": "lidi, visti, fini",
       "speaker_id": "luca",
       "metadata": {"lesson_id": "it_basics_001"}
     }
@@ -66,53 +109,118 @@ provide MFA's native Kaldi runtime on Windows. Use Pixi for actual alignment.
 }
 ```
 
-Audio paths are resolved from the registry file's parent directory. Source JSON and audio are
-never modified.
+`[input]` accepts dotted property paths for other JSON layouts. Paths are logical and relative;
+absolute machine paths are never authoritative metadata.
 
-## Mapped registry
+## Ingestion and versioning
 
-Copy `registry-align.example.toml` and edit its `[input]` dotted paths. A root JSON array uses
-`entries_path = "$"`. Property paths only traverse JSON objects; expressions and array indexing
-are not accepted.
-
-```powershell
-pixi run registry-align validate path\to\registry.json --config path\to\registry-align.toml
-pixi run registry-align plan path\to\registry.json --config path\to\registry-align.toml
-pixi run registry-align plan path\to\registry.json --config path\to\registry-align.toml --json
-pixi run registry-align process path\to\registry.json `
-  --config path\to\registry-align.toml `
-  --output path\to\alignment-output
-```
-
-Supplying a mapping configuration enables stable ID derivation for entries whose mapped ID is
-missing. Canonical input without a mapping requires an explicit ID.
-
-`process --json` emits newline-delimited progress events followed by a final structured result.
-It never invokes a shell command string and never downloads MFA models. For the included Italian
-registry, the complete workflow is exposed as Pixi tasks:
+Default processing trusts PostgreSQL. If a registry ID exists, it is reported as `skipped` before
+the incoming audio is hashed or compared:
 
 ```powershell
-pixi run models
-pixi run doctor
-pixi run validate
-pixi run pilot
-pixi run process
-pixi run status
-pixi run qc
-pixi run export
+uv run registry-align process registry.json --config registry-align.toml
 ```
 
-## Initialize templates
+When every selected ID already exists, the entire skip run is written in one transaction and MFA,
+FFmpeg, source hashing, and remote audio checks are not started.
+
+Explicit overwrite means append-if-changed, never destructive replacement:
 
 ```powershell
-pixi run registry-align init path\to\registry-directory
+uv run registry-align process registry.json --overwrite-existing --config registry-align.toml
 ```
 
-This writes `registry-align.toml` and `canonical-registry.schema.json`. Existing files are not
-overwritten unless `--force` is supplied.
+The complete content fingerprint covers source-byte SHA-256, exact transcript hash, language,
+speaker, and canonicalized user metadata. Identical content is `unchanged`. Changed content creates
+a new opaque UUID version and updates the recording's current pointer. History is ordered by UTC
+`created_at`; versions are never displayed as `v1`, `v2`, and so on. Identical audio bytes and
+identical transcript content are reused independently across logical recordings.
 
-## Quality gates
+Alignment identity additionally covers backend/model/dictionary, normalizer/tokenizer, audio
+preparation, and pipeline identity. A uniqueness constraint prevents duplicate processing results.
+A committed lease records in-flight work so MFA runs with no open database transaction and stale
+work can be reclaimed.
+
+## Audio storage and local working files
+
+The original source bytes are uploaded atomically and verified by SHA-256 before an `audio_assets`
+row is committed. Existing verified objects are reused. Transcript, metadata, speaker, or language
+changes therefore create recording versions that keep pointing to the same audio asset.
+
+New objects are checked and transferred in batches instead of opening SSH/SCP for every file.
+Upload workers run in the background while FFmpeg prepares later recordings; PostgreSQL ingestion
+still waits for the corresponding batch to pass remote hash verification. Tune the bounded
+concurrency in `[remote_audio]`:
+
+```toml
+batch_size = 24
+upload_workers = 2
+```
+
+Fetch the current audio for a recording from any configured client:
 
 ```powershell
-pixi run quality
+uv run registry-align audio fetch it_basics_001_luca --output .\it_basics_001_luca.mp3 --config registry-align.toml
 ```
+
+The download is written atomically and rejected if its bytes do not match PostgreSQL metadata.
+FFmpeg/MFA files exist only inside `.registry-align-cache/work/<run-id>` while a run is active and
+are removed when the run finishes. They are never uploaded to the server.
+
+```powershell
+uv run registry-align cache status --config registry-align.toml
+```
+
+## Operations
+
+```powershell
+uv run registry-align doctor --registry registry.json --config registry-align.toml
+uv run registry-align validate registry.json --config registry-align.toml
+uv run registry-align plan registry.json --config registry-align.toml
+uv run registry-align status --config registry-align.toml
+uv run registry-align history it_basics_001_luca --config registry-align.toml
+uv run registry-align qc --config registry-align.toml
+uv run registry-align export --format jsonl --format textgrid --config registry-align.toml
+uv run registry-align maintenance prune-runs --dry-run --config registry-align.toml
+```
+
+Run pruning deletes only expired run items/issues and their run rows. It keeps active runs, at least
+the configured number of recent runs, and all recordings, versions, assets, transcripts, alignment
+results, segments, and accepted revisions.
+
+## Database tables
+
+| Table | Purpose |
+|---|---|
+| `recordings` | Stable registry identity and explicit current-version pointer |
+| `audio_assets` | Deduplicated source-byte identity, remote object key, and audio metadata |
+| `transcript_versions` | Exact/normalized text, hashes, tokens, mappings, warnings |
+| `recording_versions` | Immutable content snapshots, supersession, current alignment pointer |
+| `alignment_results` | Processing identity, lease/status, provenance, QC summary |
+| `segments` | Immutable word/phone/silence/utterance model output |
+| `segment_revisions` | Immutable manual edits layered over model segments |
+| `runs` | Compact operational invocation history |
+| `run_items` | Per-input run outcome and durable-object references |
+| `issues` | Retainable run-scoped diagnostic events |
+
+## Development and tests
+
+Unit/static checks do not need a database. PostgreSQL integration tests use `TEST_DATABASE_URL`
+when supplied. Otherwise, when both configured database URLs are available, they create and drop a
+unique temporary schema through the admin role without touching application tables. SQLite is never
+substituted.
+
+```powershell
+$env:TEST_DATABASE_URL = "postgresql+psycopg://registry_align_app:PASSWORD@127.0.0.1:5433/registry_align_test"
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src
+uv run pytest tests/unit tests/integration/test_cli.py
+uv run pytest tests/integration/test_postgresql.py
+uv build
+```
+
+If the tunnel fails, first run `ssh -N registry-db` directly to inspect SSH configuration, stop it,
+and retry the CLI so port 5433 is available. Connection failures redact URL credentials. If the
+schema revision is behind, run `registry-align db upgrade`; normal processing will not migrate it
+silently.

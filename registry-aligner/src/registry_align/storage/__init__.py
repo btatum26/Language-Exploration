@@ -1,1 +1,1 @@
-"""SQLite persistence and atomic structured files."""
+"""PostgreSQL metadata and local atomic-file infrastructure."""
