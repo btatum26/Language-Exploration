@@ -1,0 +1,738 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from uuid import UUID
+
+from PySide6 import QtCore, QtGui, QtWidgets
+from src.audio.decoding import load_track
+from src.model.track import Track as SpectrogramTrack
+
+from alignment_workbench.audio.engine import SessionAudioEngine
+from alignment_workbench.audio.rendering import render_track_to_wav
+from alignment_workbench.services.models import IngestRequest, RecordingDetail
+from alignment_workbench.services.registry import RegistryServices
+from alignment_workbench.services.tasks import TaskManager
+from alignment_workbench.state.editor import EditorSession, Segment
+from alignment_workbench.ui.library_panel import LibraryPanel
+from alignment_workbench.ui.recording_panel import RecordingPanel
+from alignment_workbench.ui.sound_inspector import SoundInspector
+from alignment_workbench.ui.spectrum_dock import SpectrumPanel
+from alignment_workbench.ui.timeline import TimelineEditor
+from alignment_workbench.ui.transport import TransportToolbar
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedPayload:
+    detail: RecordingDetail | None
+    audio: SpectrogramTrack
+    origin: str
+
+
+@dataclass(frozen=True, slots=True)
+class InsertPayload:
+    track_id: UUID
+    audio: SpectrogramTrack
+
+
+class MainWindow(QtWidgets.QMainWindow):
+    def __init__(
+        self,
+        services: RegistryServices | None = None,
+        startup_error: str | None = None,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Alignment Workbench")
+        self.resize(1500, 920)
+        self.session = EditorSession()
+        self.services = services
+        self.startup_error = startup_error
+        self.tasks = TaskManager(self)
+        self.audio = SessionAudioEngine(self.session)
+        self._pending_ingest: IngestRequest | None = None
+        self._pending_render_metadata: dict[str, str | None] | None = None
+        self._ab_restore_interval: tuple[int, int] | None = None
+        self._build_ui()
+        self._build_actions()
+        self.session.subscribe(self._state_changed)
+        self.tasks.completed.connect(self._task_completed)
+        self.tasks.failed.connect(self._task_failed)
+        QtWidgets.QApplication.instance().focusChanged.connect(self._focus_changed)
+        self.timer = QtCore.QTimer(self)
+        self.timer.setInterval(30)
+        self.timer.timeout.connect(self._tick)
+        self.timer.start()
+        self.audition_stop_timer = QtCore.QTimer(self)
+        self.audition_stop_timer.setSingleShot(True)
+        self.audition_stop_timer.timeout.connect(self.audio.engine.pause)
+        self._check_connection()
+
+    def _build_ui(self) -> None:
+        self.transport = TransportToolbar(self.session, self)
+        self.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, self.transport)
+        self.transport.play_pause.connect(self.audio.play_pause)
+        self.transport.stop.connect(self._stop)
+        self.transport.record.connect(self._show_recording)
+        self.transport.loop_changed.connect(self.audio.set_loop)
+
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        self.library = LibraryPanel(self.services, self.tasks, auto_search=False)
+        self.library.setMinimumWidth(270)
+        self.library.setMaximumWidth(430)
+        self.library.add_recording.connect(self.load_recording)
+        self.library.relink_recording.connect(self.relink_recording)
+        self.library.error.connect(self._show_status_error)
+        splitter.addWidget(self.library)
+        self.timeline = TimelineEditor(self.session)
+        self.timeline.analysis_failed.connect(self._show_status_error)
+        splitter.addWidget(self.timeline)
+        self.inspector = SoundInspector(self.session, self.services, self.tasks)
+        self.inspector.setMinimumWidth(260)
+        self.inspector.setMaximumWidth(380)
+        self.inspector.error.connect(self._show_status_error)
+        self.inspector.audition_requested.connect(self._audition)
+        self.inspector.compare_requested.connect(self._compare)
+        splitter.addWidget(self.inspector)
+        splitter.setSizes((310, 900, 310))
+        self.setCentralWidget(splitter)
+
+        self.recording = RecordingPanel(self.tasks)
+        self.recording.preview_audio.connect(self.load_local_audio)
+        self.recording.save_requested.connect(self._ingest)
+        self.recording.create_speaker_requested.connect(self._create_speaker)
+        self.recording.error.connect(self._show_status_error)
+        self.recording_dock = QtWidgets.QDockWidget("Record / Import", self)
+        self.recording_dock.setObjectName("recordingDock")
+        self.recording_dock.setWidget(self.recording)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, self.recording_dock)
+
+        self.spectrum = SpectrumPanel(self.session, self.tasks)
+        spectrum_dock = QtWidgets.QDockWidget("Spectrum", self)
+        spectrum_dock.setObjectName("spectrumDock")
+        spectrum_dock.setWidget(self.spectrum)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, spectrum_dock)
+        spectrum_dock.hide()
+        self.spectrum_dock = spectrum_dock
+        self.statusBar().showMessage("Ready")
+        if self.startup_error:
+            self.transport.connection.setToolTip(self.startup_error)
+            self.statusBar().showMessage(self.startup_error, 15_000)
+
+    def _build_actions(self) -> None:
+        file_menu = self.menuBar().addMenu("&File")
+        self._menu_action(file_menu, "Import audio…", self.recording.import_audio, "Ctrl+O")
+        self._menu_action(
+            file_menu,
+            "Import into active track…",
+            self._import_into_active,
+            "Ctrl+Shift+O",
+        )
+        self._menu_action(file_menu, "Save as new recording…", self._commit_track)
+        file_menu.addSeparator()
+        self._menu_action(file_menu, "Quit", self.close, "Ctrl+Q")
+
+        edit = self.menuBar().addMenu("&Edit")
+        self.undo_action = self._menu_action(edit, "Undo", self.session.commands.undo, "Ctrl+Z")
+        self.redo_action = self._menu_action(
+            edit, "Redo", self.session.commands.redo, "Ctrl+Shift+Z"
+        )
+        edit.addSeparator()
+        cut_action = self._menu_action(
+            edit, "Cut", lambda: self._edit(self.session.cut_selection), "Ctrl+X"
+        )
+        copy_action = self._menu_action(
+            edit, "Copy", lambda: self._edit(self.session.copy_selection), "Ctrl+C"
+        )
+        paste_action = self._menu_action(
+            edit, "Paste", lambda: self._edit(self.session.paste), "Ctrl+V"
+        )
+        delete_action = self._menu_action(
+            edit, "Delete", lambda: self._edit(self.session.delete_selection), "Delete"
+        )
+        self._menu_action(edit, "Split at playhead", lambda: self._edit(self.session.split_at))
+        self._menu_action(edit, "Move clip left 100 ms", lambda: self._move_clip(-1))
+        self._menu_action(edit, "Move clip right 100 ms", lambda: self._move_clip(1))
+        self.editor_shortcut_actions = (
+            self.undo_action,
+            self.redo_action,
+            cut_action,
+            copy_action,
+            paste_action,
+            delete_action,
+        )
+
+        view = self.menuBar().addMenu("&View")
+        self._menu_action(view, "Zoom in", lambda: self._zoom(0.7), "+")
+        self._menu_action(view, "Zoom out", lambda: self._zoom(1.4), "-")
+        self._menu_action(view, "Zoom to selection", self._zoom_selection)
+        self._menu_action(view, "Zoom to full project", self._zoom_full)
+        self._menu_action(view, "Spectrum panel", self._toggle_spectrum)
+
+        registry = self.menuBar().addMenu("&Registry")
+        self._menu_action(registry, "Retry connection", self._check_connection)
+        self._menu_action(registry, "Refresh catalog", self.library.search)
+
+    def _menu_action(
+        self,
+        menu: QtWidgets.QMenu,
+        label: str,
+        callback: object,
+        shortcut: str | None = None,
+    ) -> QtGui.QAction:
+        action = menu.addAction(label)
+        if shortcut:
+            action.setShortcut(QtGui.QKeySequence(shortcut))
+        action.triggered.connect(callback)  # type: ignore[arg-type]
+        return action
+
+    def _state_changed(self, reason: str) -> None:
+        self._focus_changed(None, QtWidgets.QApplication.focusWidget())
+        if reason in {"timeline", "history", "clips"}:
+            self.transport.update_time(self.session.playhead_frame)
+
+    def _focus_changed(
+        self, _old: QtWidgets.QWidget | None, current: QtWidgets.QWidget | None
+    ) -> None:
+        text_active = self._is_text_input(current)
+        if hasattr(self, "editor_shortcut_actions"):
+            for action in self.editor_shortcut_actions[2:]:
+                action.setEnabled(not text_active)
+            self.undo_action.setEnabled(not text_active and self.session.commands.can_undo)
+            self.redo_action.setEnabled(not text_active and self.session.commands.can_redo)
+        self.transport.set_shortcuts_enabled(not text_active)
+
+    def _check_connection(self) -> None:
+        if self.services is None:
+            self.transport.connection.setText("DB: disconnected")
+            return
+        self.transport.connection.setText("DB: checking…")
+        self.tasks.submit(
+            "connection",
+            lambda _cancel, _progress: self.services.check_connection(),
+            replace=True,
+        )
+
+    def _load_speakers(self) -> None:
+        if self.services is None:
+            return
+        self.tasks.submit(
+            "speakers",
+            lambda _cancel, _progress: self.services.speakers(),
+            replace=True,
+        )
+
+    def _create_speaker(self, speaker_id: str, display_name: str, language: str) -> None:
+        if self.services is None:
+            self._show_status_error("Registry service is unavailable")
+            return
+        self.tasks.submit(
+            "speaker-create",
+            lambda _cancel, _progress: self.services.create_speaker(
+                speaker_id, display_name, language
+            ),
+            replace=True,
+        )
+
+    @QtCore.Slot(str)
+    def load_recording(self, recording_id: str) -> None:
+        if self.services is None:
+            self._show_status_error("Registry service is unavailable")
+            return
+        self.statusBar().showMessage(f"Loading {recording_id}…")
+
+        def operation(_cancel: object, progress: object) -> LoadedPayload:
+            detail = self.services.recording(recording_id, fetch_missing=True)
+            if detail.audio_path is None:
+                raise RuntimeError(
+                    "Database metadata exists, but audio is unavailable locally and could not "
+                    "be fetched"
+                )
+            audio = load_track(
+                detail.audio_path,
+                project_rate=self.session.sample_rate,
+                color_index=len(self.session.tracks),
+            )
+            return LoadedPayload(detail, audio, "registry")
+
+        self.tasks.submit(f"load:{recording_id}", operation, replace=True)
+
+    @QtCore.Slot(object, str)
+    def load_local_audio(self, path: Path, origin: str) -> None:
+        source = Path(path)
+        self.statusBar().showMessage(f"Decoding {source.name}…")
+        self.tasks.submit(
+            f"local:{source}",
+            lambda _cancel, _progress: LoadedPayload(
+                None,
+                load_track(
+                    source,
+                    project_rate=self.session.sample_rate,
+                    color_index=len(self.session.tracks),
+                ),
+                origin,
+            ),
+            replace=True,
+        )
+
+    def _import_into_active(self) -> None:
+        track = self.session.active_track
+        if track is None:
+            self._show_status_error("Add or load a track before importing into it")
+            return
+        value, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Import audio into active track",
+            "",
+            "Audio (*.wav *.flac *.ogg *.mp3);;All files (*)",
+        )
+        if not value:
+            return
+        source = Path(value)
+        track_id = track.id
+        self.statusBar().showMessage(f"Decoding {source.name}…")
+        self.tasks.submit(
+            f"insert-local:{track_id}",
+            lambda _cancel, _progress: InsertPayload(
+                track_id,
+                load_track(
+                    source,
+                    project_rate=self.session.sample_rate,
+                    color_index=len(self.session.tracks),
+                ),
+            ),
+            replace=True,
+        )
+
+    @QtCore.Slot(str)
+    def relink_recording(self, recording_id: str) -> None:
+        if self.services is None:
+            self._show_status_error("Registry service is unavailable")
+            return
+        value, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            f"Locate audio for {recording_id}",
+            "",
+            "Audio (*.wav *.flac *.ogg *.mp3);;All files (*)",
+        )
+        if not value:
+            return
+        source = Path(value)
+        self.tasks.submit(
+            f"relink:{recording_id}",
+            lambda _cancel, _progress: LoadedPayload(
+                self.services.recording(recording_id, fetch_missing=False),
+                load_track(
+                    source,
+                    project_rate=self.session.sample_rate,
+                    color_index=len(self.session.tracks),
+                ),
+                "relinked-local-audio",
+            ),
+            replace=True,
+        )
+
+    def _add_payload(self, payload: LoadedPayload) -> None:
+        audio = payload.audio
+        detail = payload.detail
+        summary = detail.summary if detail else None
+        words = self._segments(detail.words) if detail else []
+        phones = self._segments(detail.phones) if detail else []
+        self.session.add_audio_track(
+            audio.playback_samples,
+            name=summary.recording_id if summary else audio.name,
+            identity=(
+                f"recording-version:{summary.recording_version_id}"
+                if summary
+                else f"local:{audio.source_path}"
+            ),
+            path=audio.source_path,
+            original_rate=audio.original_rate,
+            channels=audio.channels,
+            recording_id=summary.recording_id if summary else None,
+            recording_version_id=summary.recording_version_id if summary else None,
+            speaker_id=summary.speaker_id if summary else self.recording.selected_speaker_id(),
+            transcript=summary.transcript if summary else self.recording.transcript.text(),
+            language=summary.language if summary else self.recording.language.currentText(),
+            words=words,
+            phones=phones,
+        )
+        self.statusBar().showMessage(f"Added {audio.name}", 4_000)
+
+    def _segments(self, source: tuple[object, ...]) -> list[Segment]:
+        output: list[Segment] = []
+        for item in source:
+            rate = item.timebase_sample_rate_hz  # type: ignore[attr-defined]
+            output.append(
+                Segment(
+                    id=item.id,  # type: ignore[attr-defined]
+                    kind=item.kind,  # type: ignore[attr-defined]
+                    label=item.label,  # type: ignore[attr-defined]
+                    start_frame=round(item.start_sample * self.session.sample_rate / rate),  # type: ignore[attr-defined]
+                    end_frame=round(item.end_sample * self.session.sample_rate / rate),  # type: ignore[attr-defined]
+                    timebase_sample_rate_hz=rate,
+                    parent_id=item.parent_id,  # type: ignore[attr-defined]
+                    confidence=item.confidence,  # type: ignore[attr-defined]
+                    review_state=item.review_state,  # type: ignore[attr-defined]
+                    model_label=item.model_label,  # type: ignore[attr-defined]
+                    model_start_frame=(
+                        round(item.model_start_sample * self.session.sample_rate / rate)  # type: ignore[attr-defined]
+                        if item.model_start_sample is not None  # type: ignore[attr-defined]
+                        else None
+                    ),
+                    model_end_frame=(
+                        round(item.model_end_sample * self.session.sample_rate / rate)  # type: ignore[attr-defined]
+                        if item.model_end_sample is not None  # type: ignore[attr-defined]
+                        else None
+                    ),
+                    provenance=item.provenance,  # type: ignore[attr-defined]
+                    effective_revision_id=item.effective_revision_id,  # type: ignore[attr-defined]
+                    model_segment_id=item.model_segment_id or item.id,  # type: ignore[attr-defined]
+                    saved_label=item.label,  # type: ignore[attr-defined]
+                    saved_start_frame=round(
+                        item.start_sample * self.session.sample_rate / rate  # type: ignore[attr-defined]
+                    ),
+                    saved_end_frame=round(
+                        item.end_sample * self.session.sample_rate / rate  # type: ignore[attr-defined]
+                    ),
+                )
+            )
+        return output
+
+    def _ingest(self, request: IngestRequest) -> None:
+        if self.services is None:
+            self._show_status_error("Registry service is unavailable")
+            return
+        self._pending_ingest = request
+        self.recording.status.setText("Preparing, uploading, and aligning…")
+        self.tasks.submit(
+            "ingest",
+            lambda _cancel, _progress: self.services.ingest(request, align=True),
+            replace=True,
+        )
+
+    def _commit_track(self) -> None:
+        track = self.session.active_track
+        if track is None:
+            self._show_status_error("No active track")
+            return
+        path, _filter = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Render edited track", f"{track.name}-edited.wav", "WAV (*.wav)"
+        )
+        if not path:
+            return
+        self._pending_render_metadata = {
+            "recording_id": f"{track.recording_id or track.name}-edited",
+            "transcript": track.transcript,
+            "speaker_id": track.speaker_id,
+            "language": track.language,
+        }
+        self.statusBar().showMessage("Rendering edited track…")
+        self.tasks.submit(
+            "render",
+            lambda _cancel, _progress: render_track_to_wav(self.session, track.id, Path(path)),
+            replace=True,
+        )
+
+    def _audition(self, loop: bool) -> None:
+        if not self.session.selection.active:
+            return
+        self.audio.set_loop(loop)
+        assert self.session.selection.start is not None
+        self.audio.seek(self.session.selection.start)
+        self.audio.engine.play()
+        if loop:
+            self.audition_stop_timer.stop()
+        else:
+            duration_ms = round(
+                self.session.selection.duration_frames * 1000 / self.session.sample_rate
+            )
+            self.audition_stop_timer.start(max(1, duration_ms))
+
+    def _stop(self) -> None:
+        self.audition_stop_timer.stop()
+        self.audio.stop()
+
+    def _compare(self) -> None:
+        reference_id = self.session.reference_track_id
+        active = self.session.active_track
+        if reference_id is None or active is None or reference_id == active.id:
+            self._show_status_error("Select a practice track and a different reference track")
+            return
+        reference = self.session.track(reference_id)
+        selection = self.session.selected_segment
+        if selection is None:
+            self._show_status_error("Select a word or sound segment for A/B playback")
+            return
+        segment = self.session.segment(*selection)
+        source = active.words if segment.kind == "word" else active.phones
+        target = reference.words if segment.kind == "word" else reference.phones
+        index = next((index for index, item in enumerate(source) if item.id == segment.id), -1)
+        if index < 0 or index >= len(target):
+            self._show_status_error("The reference track has no corresponding segment")
+            return
+        reference_segment = target[index]
+        assert self.session.selection.start is not None
+        assert self.session.selection.end is not None
+        self._ab_restore_interval = (
+            self.session.selection.start,
+            self.session.selection.end,
+        )
+        reference.solo = True
+        active.solo = False
+        self.audio.sync()
+        self._audition(False)
+        QtCore.QTimer.singleShot(
+            round(
+                max(250, self.session.selection.duration_frames * 1000 / self.session.sample_rate)
+            ),
+            lambda: self._play_b(active.id, reference.id, reference_segment),
+        )
+
+    def _play_b(self, active_id: UUID, reference_id: UUID, reference_segment: Segment) -> None:
+        try:
+            active = self.session.track(active_id)
+            reference = self.session.track(reference_id)
+        except StopIteration:
+            return
+        reference.solo = False
+        active.solo = True
+        self.session.set_selection(reference_segment.start_frame, reference_segment.end_frame)
+        self.audio.sync()
+        self._audition(False)
+        duration_ms = round(reference_segment.duration_frames * 1000 / self.session.sample_rate)
+        QtCore.QTimer.singleShot(max(1, duration_ms), self._finish_ab)
+
+    def _finish_ab(self) -> None:
+        for track in self.session.tracks:
+            track.solo = False
+        if self._ab_restore_interval is not None:
+            self.session.set_selection(*self._ab_restore_interval)
+        self._ab_restore_interval = None
+        self.audio.sync()
+
+    def _edit(self, operation: object) -> None:
+        if self._text_input_active():
+            return
+        try:
+            operation()  # type: ignore[operator]
+        except ValueError as exc:
+            self._show_status_error(str(exc))
+
+    def _move_clip(self, direction: int) -> None:
+        track = self.session.active_track
+        if track is None:
+            return
+        clip = next(
+            (
+                item
+                for item in track.clips
+                if item.timeline_start_frame
+                <= self.session.playhead_frame
+                < item.timeline_end_frame
+            ),
+            None,
+        )
+        if clip is None:
+            self._show_status_error("Place the playhead inside the clip to move")
+            return
+        self._edit(
+            lambda: self.session.move_clip(
+                clip.id, direction * max(1, self.session.sample_rate // 10)
+            )
+        )
+
+    def _zoom(self, factor: float) -> None:
+        self.session.viewport.zoom(factor, self.session.playhead_frame, self.session.total_frames)
+        self.session._emit("viewport")
+
+    def _zoom_selection(self) -> None:
+        if self.session.selection.active:
+            assert (
+                self.session.selection.start is not None and self.session.selection.end is not None
+            )
+            self.session.viewport.set(
+                self.session.selection.start,
+                self.session.selection.end,
+                self.session.total_frames,
+            )
+            self.session._emit("viewport")
+
+    def _zoom_full(self) -> None:
+        self.session.viewport.fit(self.session.total_frames)
+        self.session._emit("viewport")
+
+    def _toggle_spectrum(self) -> None:
+        self.spectrum_dock.setVisible(not self.spectrum_dock.isVisible())
+
+    def _show_recording(self) -> None:
+        self.recording_dock.show()
+        self.recording.start()
+
+    @QtCore.Slot(str, object, object)
+    def _task_completed(self, category: str, _request_id: object, result: object) -> None:
+        if category == "connection":
+            usable = bool(result.get("usable"))  # type: ignore[union-attr]
+            self.transport.connection.setText("DB: connected" if usable else "DB: unavailable")
+            if usable:
+                self.library.search()
+                self._load_speakers()
+        elif category.startswith(("load:", "local:", "relink:")) and isinstance(
+            result, LoadedPayload
+        ):
+            self._add_payload(result)
+        elif category.startswith("insert-local:") and isinstance(result, InsertPayload):
+            audio = result.audio
+            try:
+                self.session.add_audio_clip(
+                    result.track_id,
+                    audio.playback_samples,
+                    identity=f"local:{audio.source_path}",
+                    path=audio.source_path,
+                    original_rate=audio.original_rate,
+                    channels=audio.channels,
+                )
+            except StopIteration:
+                self._show_status_error("The target track was removed before import completed")
+            else:
+                self.statusBar().showMessage(
+                    f"Added {audio.name} to the active track at the playhead", 4_000
+                )
+        elif category == "ingest":
+            item = (result.get("items") or [{}])[0]  # type: ignore[union-attr]
+            outcome = item.get("outcome")
+            if outcome == "skipped":
+                self._resolve_existing_recording()
+            else:
+                recording_id = item.get("recording_id")
+                self.recording.status.setText(f"Saved and aligned · {outcome}")
+                if recording_id:
+                    self.load_recording(str(recording_id))
+        elif category == "speakers":
+            self.recording.set_speakers(result)  # type: ignore[arg-type]
+        elif category == "speaker-create":
+            self._load_speakers()
+            self.recording.speaker.setCurrentText(str(result["id"]))  # type: ignore[index]
+        elif category == "render":
+            metadata = self._pending_render_metadata or {}
+            self.recording.take_path = result  # type: ignore[assignment]
+            self.recording.recording_id.setText(str(metadata.get("recording_id") or ""))
+            self.recording.transcript.setText(str(metadata.get("transcript") or ""))
+            self.recording.speaker.setCurrentText(str(metadata.get("speaker_id") or ""))
+            self.recording.language.setCurrentText(str(metadata.get("language") or "it"))
+            self.recording.status.setText(
+                "Rendered a new artifact; review metadata and Save + align"
+            )
+            self.recording_dock.show()
+
+    @QtCore.Slot(str, object, str)
+    def _task_failed(self, category: str, _request_id: object, message: str) -> None:
+        if category == "connection":
+            self.transport.connection.setText("DB: disconnected")
+        if category == "ingest":
+            self.recording.status.setText(message)
+        if category.startswith(
+            ("load:", "local:", "relink:", "insert-local:", "ingest", "connection", "render")
+        ):
+            self._show_status_error(message)
+
+    def _resolve_existing_recording(self) -> None:
+        request = self._pending_ingest
+        if request is None:
+            return
+        dialog = QtWidgets.QMessageBox(self)
+        dialog.setWindowTitle("Recording already exists")
+        dialog.setText(f"{request.recording_id} already exists.")
+        cancel = dialog.addButton("Cancel", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        load = dialog.addButton("Load existing", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        version = dialog.addButton(
+            "Create new version", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+        )
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked is load:
+            self.load_recording(request.recording_id)
+        elif clicked is version:
+            self._ingest(
+                IngestRequest(
+                    recording_id=request.recording_id,
+                    audio_path=request.audio_path,
+                    transcript=request.transcript,
+                    language=request.language,
+                    speaker_id=request.speaker_id,
+                    metadata=request.metadata,
+                    overwrite_existing=True,
+                )
+            )
+        elif clicked is cancel:
+            self.recording.status.setText("Save cancelled")
+
+    def _tick(self) -> None:
+        if self.audio.is_playing:
+            self.session.playhead_frame = self.audio.current_frame
+            self.session._emit("timeline")
+        self.transport.update_time(self.session.playhead_frame)
+
+    def _text_input_active(self) -> bool:
+        return self._is_text_input(QtWidgets.QApplication.focusWidget())
+
+    @staticmethod
+    def _is_text_input(focus: QtWidgets.QWidget | None) -> bool:
+        return isinstance(
+            focus,
+            (
+                QtWidgets.QLineEdit,
+                QtWidgets.QTextEdit,
+                QtWidgets.QPlainTextEdit,
+                QtWidgets.QSpinBox,
+                QtWidgets.QComboBox,
+            ),
+        )
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+        if self._text_input_active():
+            return super().keyPressEvent(event)
+        key = event.key()
+        shift = bool(event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier)
+        if key in {QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right}:
+            direction = -1 if key == QtCore.Qt.Key.Key_Left else 1
+            step = max(1, self.session.sample_rate // 100)
+            target = min(
+                max(0, self.session.playhead_frame + direction * step),
+                self.session.total_frames,
+            )
+            if shift:
+                anchor = (
+                    self.session.selection.start
+                    if self.session.selection.active
+                    else self.session.playhead_frame
+                )
+                self.session.set_selection(anchor or 0, target)
+            self.session.set_playhead(target)
+            event.accept()
+            return
+        if key == QtCore.Qt.Key.Key_Escape:
+            selection = self.session.selected_segment
+            if selection in self.session.unsaved_alignment_edits:
+                self.session.revert_segment(*selection)  # type: ignore[arg-type]
+            else:
+                self.session.clear_selection()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _show_status_error(self, message: str) -> None:
+        self.statusBar().showMessage(message, 10_000)
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        self.timer.stop()
+        self.recording.close()
+        self.tasks.cancel_all()
+        self.tasks.wait(-1)
+        if self.services is not None:
+            close_services = getattr(self.services, "close", None)
+            if callable(close_services):
+                close_services()
+        self.timeline.close()
+        self.audio.close()
+        event.accept()

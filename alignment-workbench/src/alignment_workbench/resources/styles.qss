@@ -1,0 +1,19 @@
+QMainWindow, QWidget { background: #202328; color: #d9dde3; }
+QMenuBar, QMenu, QToolBar, QStatusBar { background: #292d33; color: #d9dde3; }
+QToolBar { spacing: 3px; border-bottom: 1px solid #111317; }
+QToolButton, QPushButton {
+  background: #343941; border: 1px solid #4c535d; border-radius: 2px; padding: 3px 7px;
+}
+QToolButton:hover, QPushButton:hover { background: #414852; }
+QToolButton:checked { background: #315d78; border-color: #6ab7e8; }
+QLineEdit, QComboBox, QSpinBox, QListWidget, QTreeWidget {
+  background: #181b1f; border: 1px solid #4b515a; color: #e4e7eb; padding: 2px;
+}
+QTreeWidget::item:selected, QListWidget::item:selected { background: #315d78; }
+QFrame#trackWidget { border: 1px solid #3d434b; background: #17191d; }
+QFrame#trackHeader { background: #25292f; border-right: 1px solid #444a53; }
+QLabel#trackMetadata { color: #aeb4bc; }
+QLabel#connectionStatus { margin-left: 12px; color: #9ecb8f; }
+QFrame#ipaKeyboard { background: #292d33; border: 1px solid #6ab7e8; }
+QProgressBar { background: #15171a; border: 1px solid #4b515a; }
+QProgressBar::chunk { background: #6ab7e8; }

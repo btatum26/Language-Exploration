@@ -3,6 +3,11 @@
 .mfa/
 .uv-cache/
 .pytest_cache/
+.ruff_cache/
+.env
+.registry-align-cache/
+registry-aligner/exports/
+registry-aligner/test-databases/
 .pytest-tmp*/
 .spectrogram-test-tmp*/
 __pycache__/

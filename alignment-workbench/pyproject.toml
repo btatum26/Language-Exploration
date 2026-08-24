@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alignment-workbench"
+version = "0.1.0"
+description = "Native multitrack alignment review and recording workspace."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "registry-aligner",
+  "spectrogram-playground",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-qt>=4.4,<5",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+alignment-workbench = "alignment_workbench.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alignment_workbench"]
+
+[tool.uv.sources]
+registry-aligner = { path = "../registry-aligner", editable = true }
+spectrogram-playground = { path = "../spectrogram-playground", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -p no:cacheprovider --basetemp=.pytest-tmp"
+qt_api = "pyside6"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
