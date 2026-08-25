@@ -130,6 +130,41 @@ def test_track_reordering_and_per_track_display_mode_preserve_timeline() -> None
     )
 
 
+def test_track_mutations_emit_targeted_events() -> None:
+    session, first = session_with_track()
+    events = []
+    session.subscribe(events.append)
+
+    session.set_track_mix(first.id, gain=1.5)
+    session.set_track_mix(first.id, muted=True)
+    session.set_track_visible(first.id, False)
+    session.set_track_name(first.id, "renamed")
+    session.set_display_mode(first.id, DisplayMode.WAVE)
+    second = session.add_audio_track(
+        np.ones(8, dtype=np.float32), name="second", identity="fixture-2"
+    )
+    session.set_reference_track(second.id)
+    session.reorder_track(second.id, -1)
+    session.active_track_id = first.id
+    session.split_at(4)
+    session.remove_track(second.id)
+
+    assert [(event.reason, event.track_id) for event in events] == [
+        ("track-mix", first.id),
+        ("track-mix", first.id),
+        ("track-layout", first.id),
+        ("track-layout", first.id),
+        ("track-layout", first.id),
+        ("track-added", second.id),
+        ("track-layout", None),
+        ("track-order", second.id),
+        ("history", None),
+        ("track-content", first.id),
+        ("history", None),
+        ("track-removed", second.id),
+    ]
+
+
 def test_revert_restores_saved_effective_revision_not_original_model() -> None:
     session = EditorSession(sample_rate=1_000)
     saved = Segment(

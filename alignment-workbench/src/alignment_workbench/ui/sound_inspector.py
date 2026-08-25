@@ -7,7 +7,7 @@ from PySide6 import QtCore, QtWidgets
 from alignment_workbench.services.models import RevisionRequest
 from alignment_workbench.services.registry import RegistryServices
 from alignment_workbench.services.tasks import TaskManager
-from alignment_workbench.state.editor import EditorSession, Segment
+from alignment_workbench.state.editor import EditorSession, Segment, SessionEvent
 from alignment_workbench.ui.ipa_keyboard import IpaLineEdit
 
 
@@ -95,8 +95,8 @@ class SoundInspector(QtWidgets.QWidget):
         layout.addWidget(self.status)
         self._set_enabled(False)
 
-    def _state_changed(self, reason: str) -> None:
-        if reason not in {"segment", "segments"}:
+    def _state_changed(self, event: SessionEvent) -> None:
+        if event.reason not in {"segment", "segments"}:
             return
         selection = self.session.selected_segment
         if selection is None:

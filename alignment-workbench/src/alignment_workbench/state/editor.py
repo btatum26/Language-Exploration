@@ -27,6 +27,14 @@ class ToolMode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class SessionEvent:
+    """A targeted state change consumed by the timeline and audio adapters."""
+
+    reason: str
+    track_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AudioSource:
     id: UUID
     identity: str
@@ -152,10 +160,10 @@ class EditorSession:
         self.clipboard_duration_frames = 0
         self.unsaved_alignment_edits: dict[tuple[UUID, str], Segment] = {}
         self.timeline_dirty = False
-        self._listeners: list[Callable[[str], None]] = []
+        self._listeners: list[Callable[[SessionEvent], None]] = []
         self.commands = CommandStack(lambda: self._emit("history"))
 
-    def subscribe(self, callback: Callable[[str], None]) -> Callable[[], None]:
+    def subscribe(self, callback: Callable[[SessionEvent], None]) -> Callable[[], None]:
         self._listeners.append(callback)
 
         def unsubscribe() -> None:
@@ -164,9 +172,10 @@ class EditorSession:
 
         return unsubscribe
 
-    def _emit(self, reason: str) -> None:
+    def _emit(self, reason: str, track_id: UUID | None = None) -> None:
+        event = SessionEvent(reason, track_id)
         for callback in tuple(self._listeners):
-            callback(reason)
+            callback(event)
 
     @property
     def total_frames(self) -> int:
@@ -234,7 +243,7 @@ class EditorSession:
             self.reference_track_id = track.id
         if len(self.tracks) == 1:
             self.viewport.fit(self.total_frames)
-        self._emit("tracks")
+        self._emit("track-added", track.id)
         return track
 
     def add_audio_clip(
@@ -286,7 +295,7 @@ class EditorSession:
         if self.reference_track_id == track_id:
             self.reference_track_id = self.tracks[0].id if self.tracks else None
         self._clamp_timeline()
-        self._emit("tracks")
+        self._emit("track-removed", track_id)
 
     def reorder_track(self, track_id: UUID, delta: int) -> None:
         old = next(index for index, item in enumerate(self.tracks) if item.id == track_id)
@@ -301,7 +310,7 @@ class EditorSession:
             lookup = {track.id: track for track in self.tracks}
             self.tracks[:] = [lookup[item] for item in order]
             self.timeline_dirty = True
-            self._emit("tracks")
+            self._emit("track-order", track_id)
 
         self.commands.push(
             CallbackCommand("Reorder track", lambda: apply(after), lambda: apply(before))
@@ -312,7 +321,51 @@ class EditorSession:
         if track.display_mode is mode:
             return
         track.display_mode = mode
-        self._emit("display")
+        self._emit("track-layout", track_id)
+
+    def set_track_mix(
+        self,
+        track_id: UUID,
+        *,
+        gain: float | None = None,
+        muted: bool | None = None,
+        solo: bool | None = None,
+    ) -> None:
+        track = self.track(track_id)
+        changed = False
+        if gain is not None:
+            value = max(0.0, float(gain))
+            if track.gain != value:
+                track.gain = value
+                changed = True
+        if muted is not None and track.muted != bool(muted):
+            track.muted = bool(muted)
+            changed = True
+        if solo is not None and track.solo != bool(solo):
+            track.solo = bool(solo)
+            changed = True
+        if changed:
+            self._emit("track-mix", track_id)
+
+    def set_track_visible(self, track_id: UUID, visible: bool) -> None:
+        track = self.track(track_id)
+        if track.visible == bool(visible):
+            return
+        track.visible = bool(visible)
+        self._emit("track-layout", track_id)
+
+    def set_track_name(self, track_id: UUID, name: str) -> None:
+        track = self.track(track_id)
+        value = name.strip()
+        if not value or track.name == value:
+            return
+        track.name = value
+        self._emit("track-layout", track_id)
+
+    def set_reference_track(self, track_id: UUID) -> None:
+        self.track(track_id)
+        self.reference_track_id = track_id
+        self._emit("track-layout")
 
     def set_playhead(self, frame: int) -> None:
         self.playhead_frame = min(max(0, int(frame)), self.total_frames)
@@ -332,7 +385,7 @@ class EditorSession:
         self.selected_segment = (track_id, segment_id)
         self.selection.set(segment.start_frame, segment.end_frame, self.total_frames)
         self.playhead_frame = segment.start_frame
-        self._emit("segment")
+        self._emit("segment", track_id)
         return segment
 
     def update_segment(self, track_id: UUID, updated: Segment, *, unsaved: bool = True) -> None:
@@ -347,7 +400,7 @@ class EditorSession:
             self.unsaved_alignment_edits.pop(key, None)
         if self.selected_segment == key:
             self.selection.set(updated.start_frame, updated.end_frame, self.total_frames)
-        self._emit("segments")
+        self._emit("segments", track_id)
 
     def revert_segment(self, track_id: UUID, segment_id: str) -> None:
         current = self.segment(track_id, segment_id)
@@ -538,7 +591,7 @@ class EditorSession:
             track.clips[:] = clips
             self.timeline_dirty = True
             self._clamp_timeline()
-            self._emit("clips")
+            self._emit("track-content", track.id)
 
         self.commands.push(CallbackCommand(label, lambda: apply(result), lambda: apply(before)))
 

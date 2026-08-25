@@ -222,6 +222,7 @@ class TrackWidget(QtWidgets.QFrame):
             modes.addWidget(button)
         layout.addLayout(modes)
         toggles = QtWidgets.QHBoxLayout()
+        self.mix_buttons: dict[str, QtWidgets.QToolButton] = {}
         for label, attr in (("M", "muted"), ("S", "solo"), ("Show", "visible")):
             button = QtWidgets.QToolButton()
             button.setText(label)
@@ -230,23 +231,24 @@ class TrackWidget(QtWidgets.QFrame):
             button.toggled.connect(
                 lambda checked, field=attr: self._set_track_boolean(field, checked)
             )
+            self.mix_buttons[attr] = button
             toggles.addWidget(button)
         layout.addLayout(toggles)
         gain_row = QtWidgets.QHBoxLayout()
         gain_row.addWidget(QtWidgets.QLabel("Gain"))
-        gain = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
-        gain.setRange(0, 200)
-        gain.setValue(round(self.track.gain * 100))
-        gain.valueChanged.connect(self._set_gain)
-        gain_row.addWidget(gain)
+        self.gain_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.gain_slider.setRange(0, 200)
+        self.gain_slider.setValue(round(self.track.gain * 100))
+        self.gain_slider.valueChanged.connect(self._set_gain)
+        gain_row.addWidget(self.gain_slider)
         layout.addLayout(gain_row)
         controls = QtWidgets.QHBoxLayout()
-        reference = QtWidgets.QToolButton()
-        reference.setText("Ref")
-        reference.setCheckable(True)
-        reference.setChecked(self.session.reference_track_id == self.track.id)
-        reference.clicked.connect(lambda: self.reference_requested.emit(self.track.id))
-        controls.addWidget(reference)
+        self.reference_button = QtWidgets.QToolButton()
+        self.reference_button.setText("Ref")
+        self.reference_button.setCheckable(True)
+        self.reference_button.setChecked(self.session.reference_track_id == self.track.id)
+        self.reference_button.clicked.connect(lambda: self.reference_requested.emit(self.track.id))
+        controls.addWidget(self.reference_button)
         for label, delta in (("↑", -1), ("↓", 1)):
             button = QtWidgets.QToolButton()
             button.setText(label)
@@ -351,6 +353,25 @@ class TrackWidget(QtWidgets.QFrame):
         self.mode_group.buttons()[list(DisplayMode).index(self.track.display_mode)].setChecked(True)
         QtCore.QTimer.singleShot(0, self._sync_tier_geometry)
 
+    def sync_mix_controls(self) -> None:
+        for field in ("muted", "solo"):
+            blocker = QtCore.QSignalBlocker(self.mix_buttons[field])
+            self.mix_buttons[field].setChecked(bool(getattr(self.track, field)))
+            del blocker
+        blocker = QtCore.QSignalBlocker(self.gain_slider)
+        self.gain_slider.setValue(round(self.track.gain * 100))
+        del blocker
+
+    def sync_layout(self) -> None:
+        if not self.name.hasFocus():
+            self.name.setText(self.track.name)
+        blocker = QtCore.QSignalBlocker(self.mix_buttons["visible"])
+        self.mix_buttons["visible"].setChecked(self.track.visible)
+        del blocker
+        self.analysis_container.setVisible(self.track.visible)
+        self.reference_button.setChecked(self.session.reference_track_id == self.track.id)
+        self.apply_display_mode()
+
     def _set_mode(self, mode: DisplayMode) -> None:
         self.session.set_display_mode(self.track.id, mode)
         self.apply_display_mode()
@@ -358,19 +379,21 @@ class TrackWidget(QtWidgets.QFrame):
     def _rename(self) -> None:
         value = self.name.text().strip()
         if value:
-            self.track.name = value
+            self.session.set_track_name(self.track.id, value)
+            self.name.setText(self.track.name)
         else:
             self.name.setText(self.track.name)
 
     def _set_track_boolean(self, field: str, checked: bool) -> None:
-        setattr(self.track, field, checked)
         if field == "visible":
-            self.analysis_container.setVisible(checked)
-        self.session._emit("tracks")
+            self.session.set_track_visible(self.track.id, checked)
+        elif field == "muted":
+            self.session.set_track_mix(self.track.id, muted=checked)
+        elif field == "solo":
+            self.session.set_track_mix(self.track.id, solo=checked)
 
     def _set_gain(self, value: int) -> None:
-        self.track.gain = value / 100
-        self.session._emit("tracks")
+        self.session.set_track_mix(self.track.id, gain=value / 100)
 
     def _seek_seconds(self, seconds: float) -> None:
         if self.session.tool is not ToolMode.SEEK:

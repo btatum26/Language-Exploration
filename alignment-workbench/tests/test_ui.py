@@ -77,9 +77,7 @@ def test_track_height_is_user_controlled_persists_and_overflows(qtbot) -> None:
     first = session.add_audio_track(
         np.zeros(10_000, dtype=np.float32), name="first", identity="first"
     )
-    session.add_audio_track(
-        np.zeros(10_000, dtype=np.float32), name="second", identity="second"
-    )
+    session.add_audio_track(np.zeros(10_000, dtype=np.float32), name="second", identity="second")
     timeline = TimelineEditor(session)
     qtbot.addWidget(timeline)
     timeline.resize(900, 360)
@@ -138,4 +136,50 @@ def test_shared_horizontal_scroll_and_plot_pan_reach_the_right_edge(qtbot) -> No
     timeline.track_widgets[track.id]._pan_seconds(3.0)
     assert (session.viewport.start, session.viewport.end) == (3_000, 5_000)
     assert timeline.horizontal_scroll.value() == 3_000
+    timeline.close()
+
+
+def test_track_events_reuse_widgets_instead_of_rebuilding_timeline(qtbot) -> None:
+    session = EditorSession(sample_rate=1_000)
+    first = session.add_audio_track(
+        np.zeros(2_000, dtype=np.float32), name="first", identity="first"
+    )
+    second = session.add_audio_track(
+        np.zeros(2_000, dtype=np.float32), name="second", identity="second"
+    )
+    timeline = TimelineEditor(session)
+    qtbot.addWidget(timeline)
+    timeline.show()
+    first_widget = timeline.track_widgets[first.id]
+    second_widget = timeline.track_widgets[second.id]
+    first_generation = first_widget.generation
+
+    for value in range(110, 161, 10):
+        first_widget.gain_slider.setValue(value)
+
+    assert timeline.track_widgets[first.id] is first_widget
+    assert timeline.track_widgets[second.id] is second_widget
+    assert first_widget.generation == first_generation
+
+    session.set_track_visible(first.id, False)
+    session.set_reference_track(second.id)
+    session.reorder_track(second.id, -1)
+
+    assert timeline.track_widgets[first.id] is first_widget
+    assert timeline.track_widgets[second.id] is second_widget
+    assert not first_widget.analysis_container.isVisible()
+    assert second_widget.reference_button.isChecked()
+    assert timeline.track_layout.indexOf(second_widget) == 0
+    assert timeline.track_layout.indexOf(first_widget) == 1
+
+    third = session.add_audio_track(
+        np.zeros(2_000, dtype=np.float32), name="third", identity="third"
+    )
+    assert timeline.track_widgets[first.id] is first_widget
+    assert timeline.track_widgets[second.id] is second_widget
+    assert third.id in timeline.track_widgets
+
+    session.remove_track(second.id)
+    assert timeline.track_widgets[first.id] is first_widget
+    assert second.id not in timeline.track_widgets
     timeline.close()

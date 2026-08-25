@@ -13,7 +13,7 @@ from alignment_workbench.audio.rendering import render_track_to_wav
 from alignment_workbench.services.models import IngestRequest, RecordingDetail
 from alignment_workbench.services.registry import RegistryServices
 from alignment_workbench.services.tasks import TaskManager
-from alignment_workbench.state.editor import EditorSession, Segment
+from alignment_workbench.state.editor import EditorSession, Segment, SessionEvent
 from alignment_workbench.ui.library_panel import LibraryPanel
 from alignment_workbench.ui.recording_panel import RecordingPanel
 from alignment_workbench.ui.sound_inspector import SoundInspector
@@ -186,9 +186,9 @@ class MainWindow(QtWidgets.QMainWindow):
         action.triggered.connect(callback)  # type: ignore[arg-type]
         return action
 
-    def _state_changed(self, reason: str) -> None:
+    def _state_changed(self, event: SessionEvent) -> None:
         self._focus_changed(None, QtWidgets.QApplication.focusWidget())
-        if reason in {"timeline", "history", "clips"}:
+        if event.reason in {"timeline", "history", "track-content"}:
             self.transport.update_time(self.session.playhead_frame)
 
     def _focus_changed(
