@@ -69,6 +69,7 @@ class EditorPlot(InteractivePlot):
     editor_drag_started = QtCore.Signal(float)
     editor_drag_moved = QtCore.Signal(float)
     editor_drag_finished = QtCore.Signal(float)
+    pan_finished = QtCore.Signal()
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
@@ -81,9 +82,14 @@ class EditorPlot(InteractivePlot):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        finished_pan = (
+            event.button() == QtCore.Qt.MouseButton.MiddleButton and self._interaction == "pan"
+        )
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.editor_drag_finished.emit(self.time_at(event.position().toPoint()))
         super().mouseReleaseEvent(event)
+        if finished_pan:
+            self.pan_finished.emit()
 
 
 class TrackWidget(QtWidgets.QFrame):
@@ -93,6 +99,9 @@ class TrackWidget(QtWidgets.QFrame):
     analysis_failed = QtCore.Signal(str)
     vertical_scroll_requested = QtCore.Signal(int)
     height_changed = QtCore.Signal(int)
+    pan_requested = QtCore.Signal(float)
+    pan_finished = QtCore.Signal()
+    zoom_requested = QtCore.Signal(float, float)
 
     def __init__(
         self,
@@ -109,6 +118,9 @@ class TrackWidget(QtWidgets.QFrame):
         self.generation = 0
         self._editor_drag_start: int | None = None
         self._moving_clip_id: UUID | None = None
+        self._last_viewport: tuple[int, int] | None = None
+        self._last_playhead_frame: int | None = None
+        self._last_selection: tuple[int | None, int | None] | None = None
         self.setObjectName("trackWidget")
         self.preferred_height = max(MIN_TRACK_HEIGHT, int(preferred_height))
         self.setFixedHeight(self.preferred_height)
@@ -151,8 +163,9 @@ class TrackWidget(QtWidgets.QFrame):
         for plot in (self.waveform, self.spectrogram):
             plot.seek_requested.connect(self._seek_seconds)
             plot.selection_requested.connect(self._select_seconds)
-            plot.pan_requested.connect(self._pan_seconds)
-            plot.zoom_requested.connect(self._zoom_seconds)
+            plot.pan_requested.connect(self.pan_requested.emit)
+            plot.pan_finished.connect(self.pan_finished.emit)
+            plot.zoom_requested.connect(self.zoom_requested.emit)
             plot.vertical_scroll_requested.connect(self.vertical_scroll_requested)
             plot.editor_drag_started.connect(self._editor_drag_started)
             plot.editor_drag_moved.connect(self._editor_drag_moved)
@@ -270,6 +283,9 @@ class TrackWidget(QtWidgets.QFrame):
     def refresh_analysis(self) -> None:
         self.generation += 1
         self.analysis.invalidate(self.track.id)
+        self._reset_timeline_cache()
+        self._wave_playhead = self._spec_playhead = None
+        self._wave_region = self._spec_region = None
         samples = self.session.render_track(self.track.id)
         source = self.session.sources[self.track.clips[0].source_id]
         self.details.setText(
@@ -286,7 +302,10 @@ class TrackWidget(QtWidgets.QFrame):
         self.analysis.analyze(
             self.track.id, self.generation, samples.copy(), self.session.sample_rate
         )
-        self.update_timeline()
+        self.update_viewport()
+        self.update_playhead()
+        self.update_selection()
+        self.update_segments()
 
     @QtCore.Slot(object, int, object)
     def _analysis_ready(self, track_id: UUID, generation: int, result: TrackAnalysis) -> None:
@@ -299,13 +318,19 @@ class TrackWidget(QtWidgets.QFrame):
         high = self.waveform.plot(
             result.waveform.times, result.waveform.maximum, pen=pg.mkPen(self.track.color)
         )
+        for curve in (low, high):
+            curve.setClipToView(True)
+            curve.setDownsampling(auto=True, method="peak")
+        self._waveform_curves = (low, high)
         self.waveform.addItem(
             pg.FillBetweenItem(low, high, brush=pg.mkBrush(self.track.color + "55"))
         )
         self.spectrogram.clear()
         image = pg.ImageItem(axisOrder="row-major")
         image.setImage(result.spectrogram.decibels, autoLevels=False, levels=(-80, 0))
+        image.setAutoDownsample(True)
         image.setLookupTable(pg.colormap.get("inferno").getLookupTable(nPts=256))
+        self._spectrogram_image = image
         duration = max(
             0.001,
             float(result.spectrogram.times[-1]) if len(result.spectrogram.times) else 0.001,
@@ -316,17 +341,47 @@ class TrackWidget(QtWidgets.QFrame):
         self.spectrogram.setYRange(0, min(8_000, maximum), padding=0)
         self._wave_playhead, self._wave_region = add_timeline_items(self.waveform)
         self._spec_playhead, self._spec_region = add_timeline_items(self.spectrogram)
-        self.update_timeline()
+        self._reset_timeline_cache()
+        self.update_viewport()
+        self.update_playhead()
+        self.update_selection()
+        self.update_segments()
 
     @QtCore.Slot(object, int, str)
     def _analysis_failed(self, track_id: UUID, generation: int, message: str) -> None:
         if track_id == self.track.id and generation == self.generation:
             self.analysis_failed.emit(message)
 
-    def update_timeline(self) -> None:
+    def _reset_timeline_cache(self) -> None:
+        self._last_viewport = None
+        self._last_playhead_frame = None
+        self._last_selection = None
+
+    def update_viewport(self) -> None:
+        viewport = (self.session.viewport.start, self.session.viewport.end)
+        if viewport == self._last_viewport:
+            return
+        self._last_viewport = viewport
         start = self.session.viewport.start / self.session.sample_rate
         end = self.session.viewport.end / self.session.sample_rate
+        for plot in (self.waveform, self.spectrogram):
+            plot.setXRange(start, end, padding=0)
+        self.tier.update()
+
+    def update_playhead(self) -> None:
+        if self.session.playhead_frame == self._last_playhead_frame:
+            return
+        self._last_playhead_frame = self.session.playhead_frame
         playhead = self.session.playhead_frame / self.session.sample_rate
+        for line in (self._wave_playhead, self._spec_playhead):
+            if line is not None:
+                line.setValue(playhead)
+
+    def update_selection(self) -> None:
+        selection_state = (self.session.selection.start, self.session.selection.end)
+        if selection_state == self._last_selection:
+            return
+        self._last_selection = selection_state
         active = self.session.selection.active
         selection = (
             (
@@ -336,15 +391,12 @@ class TrackWidget(QtWidgets.QFrame):
             if active
             else (0, 0)
         )
-        for plot in (self.waveform, self.spectrogram):
-            plot.setXRange(start, end, padding=0)
-        for line in (getattr(self, "_wave_playhead", None), getattr(self, "_spec_playhead", None)):
-            if line is not None:
-                line.setValue(playhead)
-        for region in (getattr(self, "_wave_region", None), getattr(self, "_spec_region", None)):
+        for region in (self._wave_region, self._spec_region):
             if region is not None:
                 region.setRegion(selection)
                 region.setVisible(active)
+
+    def update_segments(self) -> None:
         self.tier.update()
 
     def apply_display_mode(self) -> None:
@@ -447,18 +499,6 @@ class TrackWidget(QtWidgets.QFrame):
         self.session.set_selection(
             round(first * self.session.sample_rate), round(second * self.session.sample_rate)
         )
-
-    def _pan_seconds(self, seconds: float) -> None:
-        self.session.viewport.pan(
-            round(seconds * self.session.sample_rate), self.session.total_frames
-        )
-        self.session._emit("viewport")
-
-    def _zoom_seconds(self, factor: float, anchor: float) -> None:
-        self.session.viewport.zoom(
-            factor, round(anchor * self.session.sample_rate), self.session.total_frames
-        )
-        self.session._emit("viewport")
 
     def _select_segment(self, segment_id: str) -> None:
         self.session.select_segment(self.track.id, segment_id)

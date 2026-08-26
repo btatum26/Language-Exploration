@@ -118,22 +118,21 @@ def test_segment_tier_uses_the_exact_plot_viewbox_coordinates(qtbot) -> None:
 
 def test_shared_horizontal_scroll_and_plot_pan_reach_the_right_edge(qtbot) -> None:
     session = EditorSession(sample_rate=1_000)
-    track = session.add_audio_track(
-        np.zeros(10_000, dtype=np.float32), name="fixture", identity="fixture"
-    )
+    session.add_audio_track(np.zeros(10_000, dtype=np.float32), name="fixture", identity="fixture")
     session.viewport.set(0, 2_000, session.total_frames)
     timeline = TimelineEditor(session)
     qtbot.addWidget(timeline)
     timeline.resize(900, 400)
     timeline.show()
-    timeline.update_timeline()
+    timeline.update_viewport()
 
     assert timeline.horizontal_scroll.maximum() == 8_000
     timeline.horizontal_scroll.setValue(8_000)
     assert (session.viewport.start, session.viewport.end) == (8_000, 10_000)
 
     timeline.horizontal_scroll.setValue(0)
-    timeline.track_widgets[track.id]._pan_seconds(3.0)
+    timeline._queue_pan(3.0)
+    timeline._finish_pan()
     assert (session.viewport.start, session.viewport.end) == (3_000, 5_000)
     assert timeline.horizontal_scroll.value() == 3_000
     timeline.close()

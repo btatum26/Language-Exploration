@@ -88,3 +88,23 @@ def test_track_events_update_audio_project_without_full_renders(monkeypatch) -> 
     assert rendered == []
     assert [track.id for track in engine.project.tracks] == [first.id, third.id]
     engine.close()
+
+
+def test_navigation_events_never_render_audio(monkeypatch) -> None:
+    session = EditorSession(sample_rate=1_000)
+    track = session.add_audio_track(
+        np.zeros(10_000, dtype=np.float32), name="fixture", identity="fixture"
+    )
+    engine = SessionAudioEngine(session, FakeOutputBackend())
+    rendered = []
+    monkeypatch.setattr(session, "render_track", rendered.append)
+
+    session.set_viewport(1_000, 4_000)
+    session.pan_viewport(250)
+    session.zoom_viewport(0.5, 2_000)
+    session.set_playhead(1_500)
+    session.set_selection(1_000, 2_000)
+
+    assert engine.project.track_by_id(track.id).id == track.id
+    assert rendered == []
+    engine.close()

@@ -3,7 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from alignment_workbench.state.editor import DisplayMode, EditorSession, Segment
+from alignment_workbench.state.editor import (
+    DisplayMode,
+    EditorSession,
+    Segment,
+    SessionEventType,
+)
 
 
 def session_with_track(frames: int = 12) -> tuple[EditorSession, object]:
@@ -150,18 +155,18 @@ def test_track_mutations_emit_targeted_events() -> None:
     session.remove_track(second.id)
 
     assert [(event.reason, event.track_id) for event in events] == [
-        ("track-mix", first.id),
-        ("track-mix", first.id),
-        ("track-layout", first.id),
-        ("track-layout", first.id),
-        ("track-layout", first.id),
-        ("track-added", second.id),
-        ("track-layout", None),
-        ("track-order", second.id),
-        ("history", None),
-        ("track-content", first.id),
-        ("history", None),
-        ("track-removed", second.id),
+        (SessionEventType.TRACK_MIX, first.id),
+        (SessionEventType.TRACK_MIX, first.id),
+        (SessionEventType.TRACK_LAYOUT, first.id),
+        (SessionEventType.TRACK_LAYOUT, first.id),
+        (SessionEventType.TRACK_LAYOUT, first.id),
+        (SessionEventType.TRACK_ADDED, second.id),
+        (SessionEventType.TRACK_LAYOUT, None),
+        (SessionEventType.TRACK_ORDER, second.id),
+        (SessionEventType.HISTORY, None),
+        (SessionEventType.TRACK_CONTENT, first.id),
+        (SessionEventType.HISTORY, None),
+        (SessionEventType.TRACK_REMOVED, second.id),
     ]
 
 

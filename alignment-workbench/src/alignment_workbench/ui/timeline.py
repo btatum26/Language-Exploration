@@ -5,12 +5,13 @@ from uuid import UUID
 from PySide6 import QtCore, QtWidgets
 
 from alignment_workbench.analysis.tasks import AnalysisCoordinator
-from alignment_workbench.state.editor import EditorSession, SessionEvent
+from alignment_workbench.state.editor import EditorSession, SessionEvent, SessionEventType
 from alignment_workbench.ui.track_widget import DEFAULT_TRACK_HEIGHT, TrackWidget
 
 
 class TimelineEditor(QtWidgets.QWidget):
     analysis_failed = QtCore.Signal(str)
+    PAN_INTERVAL_MS = 16
 
     def __init__(self, session: EditorSession, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -18,6 +19,13 @@ class TimelineEditor(QtWidgets.QWidget):
         self.analysis = AnalysisCoordinator(self)
         self.track_widgets: dict[UUID, TrackWidget] = {}
         self.track_heights: dict[UUID, int] = {}
+        self._pending_pan_frames = 0.0
+        self._scroll_total_frames = -1
+        self._scroll_viewport_width = -1
+        self._pan_timer = QtCore.QTimer(self)
+        self._pan_timer.setSingleShot(True)
+        self._pan_timer.setInterval(self.PAN_INTERVAL_MS)
+        self._pan_timer.timeout.connect(self._apply_pending_pan)
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -56,7 +64,7 @@ class TimelineEditor(QtWidgets.QWidget):
             widget = self._create_track_widget(track.id)
             self.track_layout.insertWidget(self.track_layout.count() - 1, widget)
             self.track_widgets[track.id] = widget
-        self._sync_horizontal_scroll()
+        self._sync_horizontal_scroll_metrics()
 
     def _create_track_widget(self, track_id: UUID) -> TrackWidget:
         track = self.session.track(track_id)
@@ -71,13 +79,16 @@ class TimelineEditor(QtWidgets.QWidget):
         widget.reference_requested.connect(self._set_reference)
         widget.analysis_failed.connect(self.analysis_failed)
         widget.vertical_scroll_requested.connect(self._scroll_vertical)
+        widget.pan_requested.connect(self._queue_pan)
+        widget.pan_finished.connect(self._finish_pan)
+        widget.zoom_requested.connect(self._zoom)
         widget.height_changed.connect(
             lambda height, item_id=track.id: self._remember_track_height(item_id, height)
         )
         return widget
 
     def _state_changed(self, event: SessionEvent) -> None:
-        if event.reason == "track-added" and event.track_id is not None:
+        if event.reason is SessionEventType.TRACK_ADDED and event.track_id is not None:
             widget = self._create_track_widget(event.track_id)
             index = next(
                 index
@@ -86,8 +97,8 @@ class TimelineEditor(QtWidgets.QWidget):
             )
             self.track_layout.insertWidget(index, widget)
             self.track_widgets[event.track_id] = widget
-            self._sync_horizontal_scroll()
-        elif event.reason == "track-removed" and event.track_id is not None:
+            self._sync_horizontal_scroll_metrics()
+        elif event.reason is SessionEventType.TRACK_REMOVED and event.track_id is not None:
             widget = (
                 self.track_widgets.pop(event.track_id)
                 if event.track_id in self.track_widgets
@@ -99,15 +110,15 @@ class TimelineEditor(QtWidgets.QWidget):
                 widget.deleteLater()
             for item in self.track_widgets.values():
                 item.sync_layout()
-            self._sync_horizontal_scroll()
-        elif event.reason == "track-order":
+            self.update_viewport(force_scroll_metrics=True)
+        elif event.reason is SessionEventType.TRACK_ORDER:
             for index, track in enumerate(self.session.tracks):
                 widget = self.track_widgets[track.id]
                 self.track_layout.removeWidget(widget)
                 self.track_layout.insertWidget(index, widget)
-        elif event.reason == "track-mix" and event.track_id is not None:
+        elif event.reason is SessionEventType.TRACK_MIX and event.track_id is not None:
             self.track_widgets[event.track_id].sync_mix_controls()
-        elif event.reason == "track-layout":
+        elif event.reason is SessionEventType.TRACK_LAYOUT:
             widgets = (
                 (self.track_widgets[event.track_id],)
                 if event.track_id is not None
@@ -115,24 +126,58 @@ class TimelineEditor(QtWidgets.QWidget):
             )
             for widget in widgets:
                 widget.sync_layout()
-        elif event.reason == "track-content" and event.track_id is not None:
+        elif event.reason is SessionEventType.TRACK_CONTENT and event.track_id is not None:
             target_widget = self.track_widgets.get(event.track_id)
             if target_widget is not None:
                 target_widget.refresh_analysis()
-            self.update_timeline()
-        elif event.reason in {"timeline", "viewport", "segment", "segments"}:
-            self.update_timeline()
+            self.update_viewport(force_scroll_metrics=True)
+        elif event.reason is SessionEventType.VIEWPORT:
+            self.update_viewport()
+        elif event.reason is SessionEventType.PLAYHEAD:
+            self.update_playhead()
+        elif event.reason is SessionEventType.SELECTION:
+            self.update_selection()
+        elif event.reason is SessionEventType.SEGMENT_SELECTION:
+            self.update_playhead()
+            self.update_selection()
+            self.update_segments()
+        elif event.reason is SessionEventType.SEGMENTS and event.track_id is not None:
+            target_widget = self.track_widgets.get(event.track_id)
+            if target_widget is not None:
+                target_widget.update_selection()
+                target_widget.update_segments()
 
-    def update_timeline(self) -> None:
+    def update_viewport(self, *, force_scroll_metrics: bool = False) -> None:
         for widget in self.track_widgets.values():
-            widget.update_timeline()
-        self._sync_horizontal_scroll()
+            widget.update_viewport()
+        metrics_changed = (
+            self.session.total_frames != self._scroll_total_frames
+            or self.session.viewport.width != self._scroll_viewport_width
+        )
+        if force_scroll_metrics or metrics_changed:
+            self._sync_horizontal_scroll_metrics()
+        else:
+            self._sync_horizontal_scroll_value()
+
+    def update_playhead(self) -> None:
+        for widget in self.track_widgets.values():
+            widget.update_playhead()
+
+    def update_selection(self) -> None:
+        for widget in self.track_widgets.values():
+            widget.update_selection()
+
+    def update_segments(self) -> None:
+        for widget in self.track_widgets.values():
+            widget.update_segments()
 
     def _remember_track_height(self, track_id: UUID, height: int) -> None:
         self.track_heights[track_id] = int(height)
 
-    def _sync_horizontal_scroll(self) -> None:
+    def _sync_horizontal_scroll_metrics(self) -> None:
         maximum = max(0, self.session.total_frames - self.session.viewport.width)
+        self._scroll_total_frames = self.session.total_frames
+        self._scroll_viewport_width = self.session.viewport.width
         self.horizontal_scroll.blockSignals(True)
         self.horizontal_scroll.setRange(0, maximum)
         self.horizontal_scroll.setPageStep(max(1, self.session.viewport.width))
@@ -140,14 +185,46 @@ class TimelineEditor(QtWidgets.QWidget):
         self.horizontal_scroll.setValue(min(self.session.viewport.start, maximum))
         self.horizontal_scroll.blockSignals(False)
 
+    def _sync_horizontal_scroll_value(self) -> None:
+        maximum = self.horizontal_scroll.maximum()
+        value = min(self.session.viewport.start, maximum)
+        if self.horizontal_scroll.value() == value:
+            return
+        self.horizontal_scroll.blockSignals(True)
+        self.horizontal_scroll.setValue(value)
+        self.horizontal_scroll.blockSignals(False)
+
+    @QtCore.Slot(float)
+    def _queue_pan(self, seconds: float) -> None:
+        self._pending_pan_frames += float(seconds) * self.session.sample_rate
+        if not self._pan_timer.isActive():
+            self._pan_timer.start()
+
+    @QtCore.Slot()
+    def _apply_pending_pan(self) -> None:
+        requested = round(self._pending_pan_frames)
+        self._pending_pan_frames -= requested
+        if not requested:
+            return
+        actual = self.session.pan_viewport(requested)
+        if actual != requested:
+            self._pending_pan_frames = 0.0
+
+    @QtCore.Slot()
+    def _finish_pan(self) -> None:
+        self._pan_timer.stop()
+        self._apply_pending_pan()
+        self._pending_pan_frames = 0.0
+
+    @QtCore.Slot(float, float)
+    def _zoom(self, factor: float, anchor_seconds: float) -> None:
+        self._finish_pan()
+        self.session.zoom_viewport(factor, round(anchor_seconds * self.session.sample_rate))
+
     @QtCore.Slot(int)
     def _scroll_horizontal(self, frame: int) -> None:
-        self.session.viewport.set(
-            frame,
-            frame + self.session.viewport.width,
-            self.session.total_frames,
-        )
-        self.session._emit("viewport")
+        self._finish_pan()
+        self.session.set_viewport(frame, frame + self.session.viewport.width)
 
     def _set_reference(self, track_id: UUID) -> None:
         self.session.set_reference_track(track_id)
@@ -157,5 +234,6 @@ class TimelineEditor(QtWidgets.QWidget):
         bar.setValue(bar.value() - int(pixels))
 
     def close(self) -> None:
+        self._finish_pan()
         self._unsubscribe()
         self.analysis.wait(30_000)

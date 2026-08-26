@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from alignment_workbench.state.editor import EditorSession, ToolMode
+from alignment_workbench.state.editor import EditorSession, SessionEventType, ToolMode
 
 
 class TransportToolbar(QtWidgets.QToolBar):
@@ -63,7 +63,7 @@ class TransportToolbar(QtWidgets.QToolBar):
 
     def _tool(self, mode: ToolMode) -> None:
         self.session.tool = mode
-        self.session._emit("tool")
+        self.session._emit(SessionEventType.TOOL)
         self.tool_changed.emit(mode)
 
     def update_time(self, frame: int) -> None:

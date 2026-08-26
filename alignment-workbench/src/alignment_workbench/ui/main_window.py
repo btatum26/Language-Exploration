@@ -13,7 +13,12 @@ from alignment_workbench.audio.rendering import render_track_to_wav
 from alignment_workbench.services.models import IngestRequest, RecordingDetail
 from alignment_workbench.services.registry import RegistryServices
 from alignment_workbench.services.tasks import TaskManager
-from alignment_workbench.state.editor import EditorSession, Segment, SessionEvent
+from alignment_workbench.state.editor import (
+    EditorSession,
+    Segment,
+    SessionEvent,
+    SessionEventType,
+)
 from alignment_workbench.ui.library_panel import LibraryPanel
 from alignment_workbench.ui.recording_panel import RecordingPanel
 from alignment_workbench.ui.sound_inspector import SoundInspector
@@ -187,8 +192,14 @@ class MainWindow(QtWidgets.QMainWindow):
         return action
 
     def _state_changed(self, event: SessionEvent) -> None:
-        self._focus_changed(None, QtWidgets.QApplication.focusWidget())
-        if event.reason in {"timeline", "history", "track-content"}:
+        if event.reason is SessionEventType.HISTORY:
+            self._focus_changed(None, QtWidgets.QApplication.focusWidget())
+        if event.reason in {
+            SessionEventType.PLAYHEAD,
+            SessionEventType.TRACK_CONTENT,
+            SessionEventType.TRACK_ADDED,
+            SessionEventType.TRACK_REMOVED,
+        }:
             self.transport.update_time(self.session.playhead_frame)
 
     def _focus_changed(
@@ -543,24 +554,20 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
     def _zoom(self, factor: float) -> None:
-        self.session.viewport.zoom(factor, self.session.playhead_frame, self.session.total_frames)
-        self.session._emit("viewport")
+        self.session.zoom_viewport(factor, self.session.playhead_frame)
 
     def _zoom_selection(self) -> None:
         if self.session.selection.active:
             assert (
                 self.session.selection.start is not None and self.session.selection.end is not None
             )
-            self.session.viewport.set(
+            self.session.set_viewport(
                 self.session.selection.start,
                 self.session.selection.end,
-                self.session.total_frames,
             )
-            self.session._emit("viewport")
 
     def _zoom_full(self) -> None:
-        self.session.viewport.fit(self.session.total_frames)
-        self.session._emit("viewport")
+        self.session.fit_viewport()
 
     def _toggle_spectrum(self) -> None:
         self.spectrum_dock.setVisible(not self.spectrum_dock.isVisible())
@@ -669,9 +676,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _tick(self) -> None:
         if self.audio.is_playing:
-            self.session.playhead_frame = self.audio.current_frame
-            self.session._emit("timeline")
-        self.transport.update_time(self.session.playhead_frame)
+            self.session.set_playhead(self.audio.current_frame)
 
     def _text_input_active(self) -> bool:
         return self._is_text_input(QtWidgets.QApplication.focusWidget())

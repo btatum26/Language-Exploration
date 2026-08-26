@@ -26,11 +26,28 @@ class ToolMode(StrEnum):
     SPLIT = "split"
 
 
+class SessionEventType(StrEnum):
+    VIEWPORT = "viewport"
+    PLAYHEAD = "playhead"
+    SELECTION = "selection"
+    SEGMENT_SELECTION = "segment-selection"
+    SEGMENTS = "segments"
+    TRACK_CONTENT = "track-content"
+    TRACK_MIX = "track-mix"
+    TRACK_LAYOUT = "track-layout"
+    TRACK_ORDER = "track-order"
+    TRACK_ADDED = "track-added"
+    TRACK_REMOVED = "track-removed"
+    HISTORY = "history"
+    CLIPBOARD = "clipboard"
+    TOOL = "tool"
+
+
 @dataclass(frozen=True, slots=True)
 class SessionEvent:
     """A targeted state change consumed by the timeline and audio adapters."""
 
-    reason: str
+    reason: SessionEventType
     track_id: UUID | None = None
 
 
@@ -161,7 +178,7 @@ class EditorSession:
         self.unsaved_alignment_edits: dict[tuple[UUID, str], Segment] = {}
         self.timeline_dirty = False
         self._listeners: list[Callable[[SessionEvent], None]] = []
-        self.commands = CommandStack(lambda: self._emit("history"))
+        self.commands = CommandStack(lambda: self._emit(SessionEventType.HISTORY))
 
     def subscribe(self, callback: Callable[[SessionEvent], None]) -> Callable[[], None]:
         self._listeners.append(callback)
@@ -172,7 +189,7 @@ class EditorSession:
 
         return unsubscribe
 
-    def _emit(self, reason: str, track_id: UUID | None = None) -> None:
+    def _emit(self, reason: SessionEventType, track_id: UUID | None = None) -> None:
         event = SessionEvent(reason, track_id)
         for callback in tuple(self._listeners):
             callback(event)
@@ -243,7 +260,7 @@ class EditorSession:
             self.reference_track_id = track.id
         if len(self.tracks) == 1:
             self.viewport.fit(self.total_frames)
-        self._emit("track-added", track.id)
+        self._emit(SessionEventType.TRACK_ADDED, track.id)
         return track
 
     def add_audio_clip(
@@ -295,7 +312,7 @@ class EditorSession:
         if self.reference_track_id == track_id:
             self.reference_track_id = self.tracks[0].id if self.tracks else None
         self._clamp_timeline()
-        self._emit("track-removed", track_id)
+        self._emit(SessionEventType.TRACK_REMOVED, track_id)
 
     def reorder_track(self, track_id: UUID, delta: int) -> None:
         old = next(index for index, item in enumerate(self.tracks) if item.id == track_id)
@@ -310,7 +327,7 @@ class EditorSession:
             lookup = {track.id: track for track in self.tracks}
             self.tracks[:] = [lookup[item] for item in order]
             self.timeline_dirty = True
-            self._emit("track-order", track_id)
+            self._emit(SessionEventType.TRACK_ORDER, track_id)
 
         self.commands.push(
             CallbackCommand("Reorder track", lambda: apply(after), lambda: apply(before))
@@ -321,7 +338,7 @@ class EditorSession:
         if track.display_mode is mode:
             return
         track.display_mode = mode
-        self._emit("track-layout", track_id)
+        self._emit(SessionEventType.TRACK_LAYOUT, track_id)
 
     def set_track_mix(
         self,
@@ -345,14 +362,14 @@ class EditorSession:
             track.solo = bool(solo)
             changed = True
         if changed:
-            self._emit("track-mix", track_id)
+            self._emit(SessionEventType.TRACK_MIX, track_id)
 
     def set_track_visible(self, track_id: UUID, visible: bool) -> None:
         track = self.track(track_id)
         if track.visible == bool(visible):
             return
         track.visible = bool(visible)
-        self._emit("track-layout", track_id)
+        self._emit(SessionEventType.TRACK_LAYOUT, track_id)
 
     def set_track_name(self, track_id: UUID, name: str) -> None:
         track = self.track(track_id)
@@ -360,24 +377,57 @@ class EditorSession:
         if not value or track.name == value:
             return
         track.name = value
-        self._emit("track-layout", track_id)
+        self._emit(SessionEventType.TRACK_LAYOUT, track_id)
 
     def set_reference_track(self, track_id: UUID) -> None:
         self.track(track_id)
         self.reference_track_id = track_id
-        self._emit("track-layout")
+        self._emit(SessionEventType.TRACK_LAYOUT)
+
+    def set_viewport(self, start: int, end: int) -> None:
+        before = (self.viewport.start, self.viewport.end)
+        self.viewport.set(start, end, self.total_frames)
+        if (self.viewport.start, self.viewport.end) != before:
+            self._emit(SessionEventType.VIEWPORT)
+
+    def fit_viewport(self) -> None:
+        before = (self.viewport.start, self.viewport.end)
+        self.viewport.fit(self.total_frames)
+        if (self.viewport.start, self.viewport.end) != before:
+            self._emit(SessionEventType.VIEWPORT)
+
+    def zoom_viewport(self, factor: float, anchor: int) -> None:
+        before = (self.viewport.start, self.viewport.end)
+        self.viewport.zoom(factor, anchor, self.total_frames)
+        if (self.viewport.start, self.viewport.end) != before:
+            self._emit(SessionEventType.VIEWPORT)
+
+    def pan_viewport(self, delta: int) -> int:
+        before = self.viewport.start
+        self.viewport.pan(delta, self.total_frames)
+        actual_delta = self.viewport.start - before
+        if actual_delta:
+            self._emit(SessionEventType.VIEWPORT)
+        return actual_delta
 
     def set_playhead(self, frame: int) -> None:
-        self.playhead_frame = min(max(0, int(frame)), self.total_frames)
-        self._emit("timeline")
+        value = min(max(0, int(frame)), self.total_frames)
+        if value == self.playhead_frame:
+            return
+        self.playhead_frame = value
+        self._emit(SessionEventType.PLAYHEAD)
 
     def set_selection(self, first: int, second: int) -> None:
+        before = (self.selection.start, self.selection.end)
         self.selection.set(first, second, self.total_frames)
-        self._emit("timeline")
+        if (self.selection.start, self.selection.end) != before:
+            self._emit(SessionEventType.SELECTION)
 
     def clear_selection(self) -> None:
+        if self.selection.start is None and self.selection.end is None:
+            return
         self.selection.clear()
-        self._emit("timeline")
+        self._emit(SessionEventType.SELECTION)
 
     def select_segment(self, track_id: UUID, segment_id: str) -> Segment:
         segment = self.segment(track_id, segment_id)
@@ -385,7 +435,7 @@ class EditorSession:
         self.selected_segment = (track_id, segment_id)
         self.selection.set(segment.start_frame, segment.end_frame, self.total_frames)
         self.playhead_frame = segment.start_frame
-        self._emit("segment", track_id)
+        self._emit(SessionEventType.SEGMENT_SELECTION, track_id)
         return segment
 
     def update_segment(self, track_id: UUID, updated: Segment, *, unsaved: bool = True) -> None:
@@ -400,7 +450,7 @@ class EditorSession:
             self.unsaved_alignment_edits.pop(key, None)
         if self.selected_segment == key:
             self.selection.set(updated.start_frame, updated.end_frame, self.total_frames)
-        self._emit("segments", track_id)
+        self._emit(SessionEventType.SEGMENTS, track_id)
 
     def revert_segment(self, track_id: UUID, segment_id: str) -> None:
         current = self.segment(track_id, segment_id)
@@ -483,7 +533,7 @@ class EditorSession:
             raise ValueError("The selection does not contain audio on the active track")
         self.clipboard = tuple(copied)
         self.clipboard_duration_frames = end - start
-        self._emit("clipboard")
+        self._emit(SessionEventType.CLIPBOARD)
         return self.clipboard
 
     def delete_selection(self) -> None:
@@ -591,7 +641,7 @@ class EditorSession:
             track.clips[:] = clips
             self.timeline_dirty = True
             self._clamp_timeline()
-            self._emit("track-content", track.id)
+            self._emit(SessionEventType.TRACK_CONTENT, track.id)
 
         self.commands.push(CallbackCommand(label, lambda: apply(result), lambda: apply(before)))
 

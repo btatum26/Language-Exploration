@@ -32,6 +32,12 @@ viewport, playhead, tool, mute/solo/gain, per-track display mode, and dirty edit
 session sample rate are authoritative. Segment database timebases are preserved and converted only
 at service/UI boundaries.
 
+`SessionEventType` separates viewport, playhead, selection, segment, content, mix, and layout
+changes. `TimelineEditor` coalesces pan deltas from every lane through one 16 ms single-shot timer,
+then applies the accumulated integer-frame movement to the shared viewport. Viewport events update
+plot ranges, tiers, and the scrollbar value; playhead and selection events touch only their own plot
+items. Scrollbar range and step metrics are recalculated only when duration or zoom width changes.
+
 ## Audio and analysis
 
 `SessionAudioEngine` renders non-destructive clip references to arrays outside the callback and

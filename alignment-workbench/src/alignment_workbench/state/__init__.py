@@ -6,6 +6,7 @@ from alignment_workbench.state.editor import (
     EditorTrack,
     Segment,
     SessionEvent,
+    SessionEventType,
     ToolMode,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "EditorTrack",
     "Segment",
     "SessionEvent",
+    "SessionEventType",
     "ToolMode",
 ]

@@ -7,7 +7,7 @@ from src.audio.engine import AudioEngine, OutputBackend
 from src.model.project import Project
 from src.model.track import Track
 
-from alignment_workbench.state.editor import EditorSession, SessionEvent
+from alignment_workbench.state.editor import EditorSession, SessionEvent, SessionEventType
 
 
 class SessionAudioEngine:
@@ -33,19 +33,19 @@ class SessionAudioEngine:
         return self.project.transport.is_playing
 
     def _state_changed(self, event: SessionEvent) -> None:
-        if event.reason == "track-mix" and event.track_id is not None:
+        if event.reason is SessionEventType.TRACK_MIX and event.track_id is not None:
             self._sync_track_mix(event.track_id)
-        elif event.reason == "track-layout" and event.track_id is not None:
+        elif event.reason is SessionEventType.TRACK_LAYOUT and event.track_id is not None:
             self._sync_track_layout(event.track_id)
-        elif event.reason == "track-order":
+        elif event.reason is SessionEventType.TRACK_ORDER:
             self._sync_track_order()
-        elif event.reason == "track-content" and event.track_id is not None:
+        elif event.reason is SessionEventType.TRACK_CONTENT and event.track_id is not None:
             self._sync_track_content(event.track_id)
-        elif event.reason == "track-added" and event.track_id is not None:
+        elif event.reason is SessionEventType.TRACK_ADDED and event.track_id is not None:
             self._sync_track_added(event.track_id)
-        elif event.reason == "track-removed" and event.track_id is not None:
+        elif event.reason is SessionEventType.TRACK_REMOVED and event.track_id is not None:
             self._sync_track_removed(event.track_id)
-        elif event.reason in {"timeline", "segment"}:
+        elif event.reason in {SessionEventType.SELECTION, SessionEventType.SEGMENT_SELECTION}:
             self._sync_selection()
 
     def sync(self) -> None:
