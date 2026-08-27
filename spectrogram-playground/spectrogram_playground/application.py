@@ -6,7 +6,7 @@ from pathlib import Path
 import pyqtgraph as pg
 from PySide6 import QtWidgets
 
-from src.ui.main_window import MainWindow
+from spectrogram_playground.ui.main_window import MainWindow
 
 
 def main() -> int:

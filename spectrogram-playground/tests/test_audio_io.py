@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from src.analysis.cache import AnalysisCache
-from src.audio.decoding import AudioDecodeError, load_track, track_from_samples
+from spectrogram_playground.analysis.cache import AnalysisCache
+from spectrogram_playground.audio.decoding import AudioDecodeError, load_track, track_from_samples
 
 
 def test_wav_load_preserves_source_and_builds_separate_rates(tmp_path) -> None:

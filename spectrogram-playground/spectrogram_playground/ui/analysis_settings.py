@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtWidgets
 
-from src.model.project import Project
+from spectrogram_playground.model.project import Project
 
 
 class AnalysisSettingsPanel(QtWidgets.QWidget):

@@ -56,6 +56,7 @@ class SegmentData:
     model_end_sample: int | None = None
     effective_revision_id: str | None = None
     model_segment_id: str | None = None
+    topology_version: int = 0
     provenance: dict[str, Any] = field(default_factory=dict)
 
 
@@ -81,6 +82,7 @@ class RevisionRequest:
     operation: str = "update"
     affected_segment_ids: tuple[str, ...] = ()
     replacement_segments: tuple[dict[str, Any], ...] = ()
+    base_topology_version: int = 0
 
 
 @dataclass(frozen=True, slots=True)

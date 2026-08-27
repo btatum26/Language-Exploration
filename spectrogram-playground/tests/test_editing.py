@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.audio.decoding import track_from_samples
-from src.audio.editing import copy_region, delete_region, move_region, paste_clip
+from spectrogram_playground.audio.decoding import track_from_samples
+from spectrogram_playground.audio.editing import copy_region, delete_region, move_region, paste_clip
 
 
 def make_track():

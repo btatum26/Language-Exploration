@@ -18,6 +18,7 @@ from registry_align.domain.audio import PreparedRecording
 from registry_align.domain.entries import RegistryEntry
 from registry_align.domain.runs import ProcessRequest
 from registry_align.domain.segments import AlignmentSegment, SegmentRevision
+from registry_align.errors import ConfigurationError
 from registry_align.pipeline.cache import content_fingerprint
 from registry_align.pipeline.service import AlignmentService
 from registry_align.storage.postgres import PostgresUnitOfWorkFactory
@@ -32,6 +33,7 @@ from registry_align.storage.tables import (
 )
 from registry_align.storage.tunnel import SshTunnel
 from registry_align.text.normalizer import normalize_transcript
+from registry_align.workbench import RegistryWorkbenchService
 
 pytestmark = pytest.mark.postgresql
 
@@ -404,6 +406,158 @@ def test_accepted_revision_is_effective_and_immutable(engine: Engine, tmp_path: 
     assert effective[0]["label"] == "salve"
     with engine.connect() as connection:
         assert connection.scalar(select(func.count()).select_from(segment_revisions)) == 1
+
+
+def test_composable_revision_topology_and_optimistic_concurrency(
+    engine: Engine, tmp_path: Path
+) -> None:
+    version_id, _ = ingest(engine, entry(tmp_path, "chain", b"audio"), overwrite=False)
+    alignment_id, _ = claim(engine, version_id)
+    word = model_segment("chain")
+    first = word.model_copy(
+        update={
+            "segment_id": "chain:phone:0",
+            "tier": "phone",
+            "label": "a",
+            "backend_label": "a",
+            "start_sample": 1600,
+            "end_sample": 8000,
+            "start_s": 0.1,
+            "end_s": 0.5,
+            "parent_segment_id": word.segment_id,
+        }
+    )
+    second = first.model_copy(
+        update={
+            "segment_id": "chain:phone:1",
+            "label": "b",
+            "backend_label": "b",
+            "start_sample": 8000,
+            "end_sample": 14400,
+            "start_s": 0.5,
+            "end_s": 0.9,
+        }
+    )
+    with PostgresUnitOfWorkFactory(engine)() as uow:
+        uow.repository.complete_alignment(alignment_id, (word, first, second), {})
+        uow.commit()
+    with engine.connect() as connection:
+        rows = list(
+            connection.execute(
+                select(segments).where(segments.c.alignment_result_id == alignment_id)
+            ).mappings()
+        )
+    phone_ids = [str(row["id"]) for row in rows if row["kind"] == "phone"]
+    parent_id = str(next(row["id"] for row in rows if row["kind"] == "word"))
+    service = RegistryWorkbenchService(
+        AlignmentService(AppConfig(), uow_factory=PostgresUnitOfWorkFactory(engine))
+    )
+    service.save_revision(
+        segment_id=phone_ids[0],
+        base_run_id=str(alignment_id),
+        start_sample=None,
+        end_sample=None,
+        label=None,
+        review_state="accepted",
+        operation="split",
+        affected_segment_ids=(phone_ids[0],),
+        replacement_segments=(
+            {
+                "segment_id": "left",
+                "label": "a1",
+                "start_sample": 1600,
+                "end_sample": 4000,
+                "parent_segment_id": parent_id,
+            },
+            {
+                "segment_id": "middle",
+                "label": "a2",
+                "start_sample": 4000,
+                "end_sample": 8000,
+                "parent_segment_id": parent_id,
+            },
+        ),
+        base_topology_version=0,
+    )
+    service.save_revision(
+        segment_id=phone_ids[0],
+        base_run_id=str(alignment_id),
+        start_sample=None,
+        end_sample=None,
+        label="A1",
+        review_state="accepted",
+        affected_segment_ids=("left",),
+        base_topology_version=1,
+    )
+    service.save_revision(
+        segment_id=phone_ids[0],
+        base_run_id=str(alignment_id),
+        start_sample=None,
+        end_sample=None,
+        label=None,
+        review_state="accepted",
+        operation="merge",
+        affected_segment_ids=("middle", phone_ids[1]),
+        replacement_segments=(
+            {
+                "segment_id": "merged",
+                "label": "a2b",
+                "start_sample": 4000,
+                "end_sample": 14400,
+                "parent_segment_id": parent_id,
+            },
+        ),
+        base_topology_version=2,
+    )
+    with PostgresUnitOfWorkFactory(engine)() as uow:
+        effective = [
+            item for item in uow.repository.effective_segments("chain") if item["tier"] == "phone"
+        ]
+    assert [(item["id"], item["label"]) for item in effective] == [
+        ("left", "A1"),
+        ("merged", "a2b"),
+    ]
+    assert effective[0]["start_sample"] == 1600
+    assert effective[-1]["end_sample"] == 14400
+    with pytest.raises(ConfigurationError, match="changed in another editor"):
+        service.save_revision(
+            segment_id=phone_ids[0],
+            base_run_id=str(alignment_id),
+            start_sample=None,
+            end_sample=None,
+            label="stale",
+            review_state="accepted",
+            affected_segment_ids=("left",),
+            base_topology_version=1,
+        )
+
+
+@pytest.mark.parametrize("historical_state", ["proposed", "rejected"])
+def test_latest_accepted_revision_clears_historical_catalog_state(
+    engine: Engine, tmp_path: Path, historical_state: str
+) -> None:
+    version_id, _ = ingest(engine, entry(tmp_path, "review", b"audio"), overwrite=False)
+    alignment_id, _ = claim(engine, version_id)
+    with PostgresUnitOfWorkFactory(engine)() as uow:
+        uow.repository.complete_alignment(alignment_id, (model_segment("review"),), {})
+        uow.commit()
+    with engine.connect() as connection:
+        segment_id = str(connection.scalar(select(segments.c.id)))
+    service = RegistryWorkbenchService(
+        AlignmentService(AppConfig(), uow_factory=PostgresUnitOfWorkFactory(engine))
+    )
+    for state in (historical_state, "accepted"):
+        service.save_revision(
+            segment_id=segment_id,
+            base_run_id=str(alignment_id),
+            start_sample=None,
+            end_sample=None,
+            label=state,
+            review_state=state,
+            affected_segment_ids=(segment_id,),
+            base_topology_version=0,
+        )
+    assert service.catalog()["items"][0]["review_state"] == "verified"
 
 
 def test_run_pruning_keeps_durable_history(engine: Engine, tmp_path: Path) -> None:

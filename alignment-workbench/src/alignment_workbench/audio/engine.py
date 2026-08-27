@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from src.audio.decoding import track_from_samples
-from src.audio.engine import AudioEngine, OutputBackend
-from src.model.project import Project
-from src.model.track import Track
+from PySide6 import QtCore
+from spectrogram_playground.audio.engine import AudioEngine, OutputBackend
+from spectrogram_playground.model.project import Project
+from spectrogram_playground.model.track import Track
 
+from alignment_workbench.audio.render_tasks import RenderCoordinator
 from alignment_workbench.state.editor import EditorSession, SessionEvent, SessionEventType
 
 
-class SessionAudioEngine:
+class SessionAudioEngine(QtCore.QObject):
     """Adapter onto Spectrogram Playground's shared-clock mixer and output engine."""
 
     def __init__(
@@ -18,9 +19,12 @@ class SessionAudioEngine:
         session: EditorSession,
         backend: OutputBackend | None = None,
     ) -> None:
+        super().__init__()
         self.session = session
         self.project = Project(playback_rate=session.sample_rate)
         self.engine = AudioEngine(self.project, backend=backend)
+        self.renders = RenderCoordinator(self)
+        self.renders.ready.connect(self._render_ready)
         self._unsubscribe = session.subscribe(self._state_changed)
         self.sync()
 
@@ -33,6 +37,9 @@ class SessionAudioEngine:
         return self.project.transport.is_playing
 
     def _state_changed(self, event: SessionEvent) -> None:
+        if event.reason is SessionEventType.BATCH:
+            self._sync_batch(event)
+            return
         if event.reason is SessionEventType.TRACK_MIX and event.track_id is not None:
             self._sync_track_mix(event.track_id)
         elif event.reason is SessionEventType.TRACK_LAYOUT and event.track_id is not None:
@@ -40,13 +47,33 @@ class SessionAudioEngine:
         elif event.reason is SessionEventType.TRACK_ORDER:
             self._sync_track_order()
         elif event.reason is SessionEventType.TRACK_CONTENT and event.track_id is not None:
-            self._sync_track_content(event.track_id)
+            self._schedule_track_content(event.track_id)
         elif event.reason is SessionEventType.TRACK_ADDED and event.track_id is not None:
             self._sync_track_added(event.track_id)
         elif event.reason is SessionEventType.TRACK_REMOVED and event.track_id is not None:
             self._sync_track_removed(event.track_id)
         elif event.reason in {SessionEventType.SELECTION, SessionEventType.SEGMENT_SELECTION}:
             self._sync_selection()
+        elif event.reason is SessionEventType.ACTIVE_TRACK:
+            self._sync_active_track()
+
+    def _sync_batch(self, event: SessionEvent) -> None:
+        changes = event.changes
+        if SessionEventType.TRACK_REMOVED in changes and event.track_id is not None:
+            self._sync_track_removed(event.track_id)
+        elif SessionEventType.TRACK_CONTENT in changes and event.track_id is not None:
+            self._schedule_track_content(event.track_id)
+        if SessionEventType.ACTIVE_TRACK in changes:
+            self._sync_active_track()
+        if SessionEventType.SELECTION in changes or SessionEventType.SEGMENT_SELECTION in changes:
+            self._sync_selection()
+        if SessionEventType.PLAYHEAD in changes:
+            self.project.transport.seek(self.session.playhead_frame, self.project.total_frames)
+
+    def _sync_active_track(self) -> None:
+        with self.engine.mixer.lock:
+            self.project.active_track_id = self.session.active_track_id
+        self._sync_selection()
 
     def sync(self) -> None:
         was_playing = self.project.transport.is_playing
@@ -68,13 +95,15 @@ class SessionAudioEngine:
     def _render_project_track(self, track_id: UUID) -> Track:
         editor_track = self.session.track(track_id)
         samples = self.session.render_track(editor_track.id)
-        track = track_from_samples(
-            samples,
-            self.session.sample_rate,
+        track = Track(
             name=editor_track.name,
-            project_rate=self.session.sample_rate,
-            analysis_rate=16_000,
+            source_samples=samples,
+            original_rate=self.session.sample_rate,
             channels=1,
+            playback_samples=samples,
+            playback_rate=self.session.sample_rate,
+            analysis_samples=samples,
+            analysis_rate=self.session.sample_rate,
             source_path=None,
             origin="alignment-workbench-session",
         )
@@ -119,6 +148,14 @@ class SessionAudioEngine:
             self.project.transport.seek(self.session.playhead_frame, self.project.total_frames)
         self._sync_selection()
 
+    def _schedule_track_content(self, track_id: UUID) -> None:
+        self.renders.render(self.session.capture_render_plan(track_id))
+
+    @QtCore.Slot(object)
+    def _render_ready(self, snapshot: object) -> None:
+        if self.session.install_render_snapshot(snapshot):  # type: ignore[arg-type]
+            self._sync_track_content(snapshot.track_id)  # type: ignore[attr-defined]
+
     def _sync_track_added(self, track_id: UUID) -> None:
         track = self._render_project_track(track_id)
         index = next(index for index, item in enumerate(self.session.tracks) if item.id == track.id)
@@ -138,6 +175,8 @@ class SessionAudioEngine:
 
     def _sync_selection(self) -> None:
         with self.engine.mixer.lock:
+            for selection in self.project.selections.values():
+                selection.clear()
             if self.session.active_track_id is None:
                 return
             selection = self.project.selection_for(self.session.active_track_id)
@@ -176,4 +215,5 @@ class SessionAudioEngine:
 
     def close(self) -> None:
         self._unsubscribe()
+        self.renders.cancel_all()
         self.engine.close()

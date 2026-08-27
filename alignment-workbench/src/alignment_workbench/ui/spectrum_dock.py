@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
-from src.analysis.spectrum import SpectrumResult, calculate_spectrum
+from spectrogram_playground.analysis.spectrum import SpectrumResult, calculate_spectrum
 
 from alignment_workbench.services.tasks import TaskManager
 from alignment_workbench.state.editor import EditorSession
@@ -49,7 +49,7 @@ class SpectrumPanel(QtWidgets.QWidget):
             self.session.selection.start : self.session.selection.end
         ]
         self._color = track.color
-        self.status.setText("Analyzing selection…")
+        self.status.setText("Analyzing selectionâ€¦")
         self.tasks.submit(
             "spectrum",
             lambda _cancel, _progress: calculate_spectrum(samples, self.session.sample_rate),

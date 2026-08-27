@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -32,12 +34,14 @@ class RegistryServices:
         *,
         config: AppConfig | None = None,
         adapter_mode: bool = True,
+        mfa_preflight: dict[str, Any] | None = None,
     ) -> None:
         if backend is None and config is None:
             raise ValueError("a registry backend or configuration is required")
         self._backend = backend
         self._config = config
         self._adapter_mode = adapter_mode
+        self._mfa_preflight = mfa_preflight or {"usable": False, "searched": ()}
         self._runtime: DatabaseRuntime | None = None
         self._engine: Any = None
         self._lock = threading.RLock()
@@ -54,7 +58,64 @@ class RegistryServices:
         config = load_config(config_path)
         if config_path is not None:
             config = cls._resolve_config_paths(config, config_path.parent.resolve())
-        return cls(config=config, adapter_mode=config_path is not None)
+        registry_root = config_path.parent.resolve() if config_path is not None else Path.cwd()
+        config, preflight = cls._discover_mfa(config, registry_root)
+        return cls(
+            config=config,
+            adapter_mode=config_path is not None,
+            mfa_preflight=preflight,
+        )
+
+    @staticmethod
+    def _discover_mfa(config: AppConfig, registry_root: Path) -> tuple[AppConfig, dict[str, Any]]:
+        configured = config.alignment.mfa.executable
+        environment = os.getenv("REGISTRY_ALIGN_MFA", "").strip()
+        searched: list[str] = []
+        selected: str | None = None
+        if environment:
+            searched.append(environment)
+            selected = shutil.which(environment) or (
+                str(Path(environment).resolve(strict=False))
+                if Path(environment).is_file()
+                else None
+            )
+        elif configured and configured != "mfa":
+            searched.append(configured)
+            selected = shutil.which(configured) or (
+                str(Path(configured).resolve(strict=False)) if Path(configured).is_file() else None
+            )
+        else:
+            path_match = shutil.which("mfa")
+            searched.append(path_match or "PATH:mfa")
+            if path_match:
+                selected = path_match
+            pixi = (
+                registry_root / ".pixi" / "envs" / "default" / "Scripts" / "mfa.exe"
+                if os.name == "nt"
+                else registry_root / ".pixi" / "envs" / "default" / "bin" / "mfa"
+            )
+            searched.append(str(pixi))
+            if selected is None and pixi.is_file():
+                selected = str(pixi)
+        preflight = {
+            "usable": selected is not None,
+            "executable": selected,
+            "searched": tuple(searched),
+            "message": (
+                f"MFA: {selected}"
+                if selected is not None
+                else "MFA unavailable; searched: " + ", ".join(searched)
+            ),
+        }
+        if selected is None:
+            return config, preflight
+        mfa = config.alignment.mfa.model_copy(update={"executable": selected})
+        return (
+            config.model_copy(
+                update={"alignment": config.alignment.model_copy(update={"mfa": mfa})}
+            ),
+            preflight,
+        )
 
     def _service(self) -> RegistryWorkbenchService:
         with self._lock:
@@ -126,17 +187,21 @@ class RegistryServices:
     def check_connection(self) -> dict[str, Any]:
         backend = self._service()
         if self._engine is None:
-            return backend.check_connection()
+            result = backend.check_connection()
+            result["mfa"] = self._mfa_preflight
+            return result
         try:
             result = check_database(self._engine)
             result["revision"] = schema_status(self._engine)
         except Exception:
             self.close()
             raise
-        result["usable"] = bool(
-            result.get("usable") and result["revision"].get("current_is_head")
-        )
+        result["usable"] = bool(result.get("usable") and result["revision"].get("current_is_head"))
+        result["mfa"] = self._mfa_preflight
         return result
+
+    def preflight(self) -> dict[str, Any]:
+        return dict(self._mfa_preflight)
 
     def catalog(self, query: CatalogQuery) -> CatalogPage:
         raw = self._service().catalog(
@@ -180,6 +245,7 @@ class RegistryServices:
             operation=request.operation,
             affected_segment_ids=request.affected_segment_ids,
             replacement_segments=request.replacement_segments,
+            base_topology_version=request.base_topology_version,
         )
 
     def revision_history(self, segment_id: str) -> tuple[dict[str, Any], ...]:
@@ -217,6 +283,8 @@ class RegistryServices:
     @staticmethod
     def _segment(item: dict[str, Any]) -> SegmentData:
         provenance = dict(item.get("model_provenance", {}))
+        if item.get("token_mappings"):
+            provenance.setdefault("source_token_ids", tuple(item["token_mappings"]))
         if item.get("alignment_result_id") is not None:
             provenance.setdefault("alignment_result_id", str(item["alignment_result_id"]))
             provenance.setdefault("run_id", str(item["alignment_result_id"]))
@@ -237,5 +305,6 @@ class RegistryServices:
                 str(item["effective_revision_id"]) if item.get("effective_revision_id") else None
             ),
             model_segment_id=item.get("model_segment_id"),
+            topology_version=int(item.get("topology_version", 0)),
             provenance=provenance,
         )

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.audio.decoding import track_from_samples
-from src.model import Project, VisualizationTab
+from spectrogram_playground.audio.decoding import track_from_samples
+from spectrogram_playground.model import Project, VisualizationTab
 
 
 def make_track(name: str, seconds: float = 1.0):

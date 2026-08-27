@@ -11,6 +11,7 @@ from uuid import uuid4
 from registry_align.audio.probe import sha256_file
 from registry_align.domain.entries import RegistryEntry
 from registry_align.domain.segments import SegmentReplacement, SegmentRevision
+from registry_align.domain.topology import replay_effective_topology, validate_candidate_revision
 from registry_align.errors import ConfigurationError
 from registry_align.pipeline.service import AlignmentService
 
@@ -103,6 +104,7 @@ class RegistryWorkbenchService:
         operation: str = "update",
         affected_segment_ids: tuple[str, ...] = (),
         replacement_segments: tuple[dict[str, Any], ...] = (),
+        base_topology_version: int | None = None,
     ) -> dict[str, Any]:
         state = {"needs-review": "proposed"}.get(review_state, review_state)
         if state not in {"proposed", "accepted", "rejected"}:
@@ -116,41 +118,56 @@ class RegistryWorkbenchService:
         replacements = tuple(
             SegmentReplacement.model_validate(item) for item in replacement_segments
         )
+        revision_id = str(uuid4())
         with self.alignment._uows() as factory, factory() as uow:
-            model_segments = uow.repository.segments_by_ids(affected)
-            parent_ids = tuple(
-                str(item["parent_segment_id"])
-                for item in model_segments
-                if item.get("parent_segment_id") is not None
+            model_segments, history = uow.repository.alignment_topology(base_run_id, lock=True)
+            topology = replay_effective_topology(model_segments, history)
+            if base_topology_version is not None and base_topology_version != topology.version:
+                raise ConfigurationError(
+                    "the alignment topology changed in another editor; reload before saving "
+                    f"(expected {base_topology_version}, current {topology.version})"
+                )
+            candidate = {
+                "id": revision_id,
+                "segment_id": segment_id,
+                "start_sample_override": start_sample,
+                "end_sample_override": end_sample,
+                "label_override": label,
+                "review_state": state,
+                "operation": operation_value,
+                "effective_target_segment_ids": affected,
+                "replacement_segments": [item.model_dump(mode="json") for item in replacements],
+            }
+            targets = validate_candidate_revision(topology, candidate)
+            anchors = {str(topology.by_id()[target]["model_segment_id"]) for target in targets}
+            if segment_id not in anchors:
+                raise ConfigurationError(
+                    "revision history anchor does not own the effective target; reload and retry"
+                )
+            revision = SegmentRevision(
+                revision_id=revision_id,
+                segment_id=segment_id,
+                base_run_id=base_run_id,
+                start_sample_override=start_sample,
+                end_sample_override=end_sample,
+                label_override=label,
+                review_status=state,
+                author=author,
+                created_at=datetime.now(UTC),
+                reason=reason,
+                operation=operation_value,
+                affected_segment_ids=affected,
+                effective_target_segment_ids=targets,
+                replacement_segments=replacements,
+                base_topology_version=topology.version,
             )
-            parents = uow.repository.segments_by_ids(parent_ids)
-            self._validate_revision_operation(
-                operation,
-                model_segments,
-                replacements,
-                start_sample=start_sample,
-                end_sample=end_sample,
-                parents=parents,
-            )
-        revision = SegmentRevision(
-            revision_id=str(uuid4()),
-            segment_id=segment_id,
-            base_run_id=base_run_id,
-            start_sample_override=start_sample,
-            end_sample_override=end_sample,
-            label_override=label,
-            review_status=state,
-            author=author,
-            created_at=datetime.now(UTC),
-            reason=reason,
-            operation=operation_value,
-            affected_segment_ids=affected,
-            replacement_segments=replacements,
-        )
-        with self.alignment._uows() as factory, factory() as uow:
             revision_id = uow.repository.save_revision(revision)
             uow.commit()
-        return {"revision_id": revision_id, "review_state": state}
+        return {
+            "revision_id": revision_id,
+            "review_state": state,
+            "topology_version": topology.version + (state == "accepted"),
+        }
 
     @staticmethod
     def _validate_revision_operation(

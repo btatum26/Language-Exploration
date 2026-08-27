@@ -43,8 +43,8 @@ Set `REGISTRY_ALIGN_DATABASE_URL` to a `postgresql+psycopg://` URL. The normal t
 
 ```powershell
 # alignment-workbench/.env
-REGISTRY_ALIGN_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@127.0.0.1:5433/registry
-REGISTRY_ALIGN_DATABASE_ADMIN_URL=postgresql+psycopg://ADMIN:PASSWORD@127.0.0.1:5433/registry
+REGISTRY_ALIGN_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@127.0.0.1:5433/registry_align
+REGISTRY_ALIGN_DATABASE_ADMIN_URL=postgresql+psycopg://ADMIN:PASSWORD@127.0.0.1:5433/registry_align
 
 # PowerShell, optional configuration override
 $env:ALIGNMENT_WORKBENCH_CONFIG='..\registry-aligner\registry-align.example.toml'
@@ -157,7 +157,8 @@ database. SQLite is not used as a substitute.
 - **Disconnected:** verify the SSH tunnel, `REGISTRY_ALIGN_DATABASE_URL`, and run the schema upgrade.
 - **Metadata but no audio:** correct the configured corpus root or verify Registry Aligner's remote
   SSH audio host; retry adding the recording.
-- **MFA failure:** run `registry-align doctor`; the workbench uses the same models and wide-beam
+- **MFA failure:** inspect the workbench connection tooltip, then run `registry-align doctor`;
+  discovery checks the explicit override, `PATH`, and Registry Aligner's Pixi environment. The workbench uses the same models and wide-beam
   configuration as the CLI.
 - **No microphone:** verify the selected PortAudio device and Windows input permissions.
 - **Slow first display:** waveform and STFT caches are generated in worker threads; later rebuilds

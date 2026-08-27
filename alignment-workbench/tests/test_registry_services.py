@@ -8,9 +8,7 @@ import alignment_workbench.services.registry as registry_module
 from alignment_workbench.services.registry import RegistryServices
 
 
-def test_workbench_env_is_loaded_before_registry_configuration(
-    tmp_path, monkeypatch
-) -> None:
+def test_workbench_env_is_loaded_before_registry_configuration(tmp_path, monkeypatch) -> None:
     dotenv = tmp_path / ".env"
     dotenv.write_text(
         "REGISTRY_ALIGN_DATABASE_URL=postgresql+psycopg://app:secret@127.0.0.1:5433/db\n",
@@ -146,3 +144,36 @@ def test_failed_database_check_rebuilds_the_tunnel_on_retry(monkeypatch) -> None
     assert services.check_connection()["usable"] is True
     assert events == ["created", "entered", "closed", "created", "entered"]
     services.close()
+
+
+def test_mfa_discovery_checks_path_then_registry_pixi(tmp_path, monkeypatch) -> None:
+    pixi = (
+        tmp_path
+        / ".pixi"
+        / "envs"
+        / "default"
+        / ("Scripts/mfa.exe" if os.name == "nt" else "bin/mfa")
+    )
+    pixi.parent.mkdir(parents=True)
+    pixi.write_bytes(b"executable")
+    monkeypatch.delenv("REGISTRY_ALIGN_MFA", raising=False)
+    monkeypatch.setattr(registry_module.shutil, "which", lambda _value: None)
+
+    config, result = RegistryServices._discover_mfa(AppConfig(), tmp_path)
+
+    assert result["usable"] is True
+    assert result["executable"] == str(pixi)
+    assert result["searched"] == ("PATH:mfa", str(pixi))
+    assert config.alignment.mfa.executable == str(pixi)
+
+
+def test_explicit_mfa_override_wins_without_falling_through(tmp_path, monkeypatch) -> None:
+    executable = tmp_path / "custom-mfa.exe"
+    executable.write_bytes(b"executable")
+    monkeypatch.setenv("REGISTRY_ALIGN_MFA", str(executable))
+    monkeypatch.setattr(registry_module.shutil, "which", lambda _value: None)
+
+    _config, result = RegistryServices._discover_mfa(AppConfig(), tmp_path)
+
+    assert result["searched"] == (str(executable),)
+    assert result["executable"] == str(executable.resolve())

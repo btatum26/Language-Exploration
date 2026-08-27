@@ -8,12 +8,12 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore
 
-from src.analysis.cache import AnalysisCache
-from src.analysis.formants import estimate_formants
-from src.analysis.pitch import estimate_acoustic_tracks
-from src.analysis.spectrogram import calculate_spectrogram
-from src.model.project import Project
-from src.model.track import Track
+from spectrogram_playground.analysis.cache import AnalysisCache
+from spectrogram_playground.analysis.formants import estimate_formants
+from spectrogram_playground.analysis.pitch import estimate_acoustic_tracks
+from spectrogram_playground.analysis.spectrogram import calculate_spectrogram
+from spectrogram_playground.model.project import Project
+from spectrogram_playground.model.track import Track
 
 from .linked_view import InteractivePlot, add_timeline_items
 from .track_workspace import TrackWorkspace
@@ -139,7 +139,7 @@ class SpectrogramWorkspace(TrackWorkspace):
     def populate_plot(self, plot: InteractivePlot, track: Track) -> None:
         plot.setLabel("left", "Frequency", units="Hz")
         plot.setYRange(self.project.settings.fmin, self.project.settings.fmax, padding=0)
-        plot.addItem(pg.TextItem("Computing…", color="#aeb4bc", anchor=(0, 0)))
+        plot.addItem(pg.TextItem("Computingâ€¦", color="#aeb4bc", anchor=(0, 0)))
         task = SpectrogramTask(track, replace(self.project.settings), self.cache, self._generation)
         task.signals.completed.connect(self._analysis_ready)
         task.signals.failed.connect(self._analysis_failed)

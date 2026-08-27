@@ -68,4 +68,6 @@ class SegmentRevision(BaseModel):
     reason: str | None = None
     operation: Literal["update", "split", "merge"] = "update"
     affected_segment_ids: tuple[str, ...] = ()
+    effective_target_segment_ids: tuple[str, ...] = ()
     replacement_segments: tuple[SegmentReplacement, ...] = ()
+    base_topology_version: int | None = Field(default=None, ge=0)

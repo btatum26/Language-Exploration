@@ -6,10 +6,10 @@ import time
 import numpy as np
 from PySide6 import QtCore, QtTest
 
-from src.audio.decoding import track_from_samples
-from src.audio.engine import AudioEngine, FakeOutputBackend
-from src.model import Project
-from src.ui.main_window import MainWindow
+from spectrogram_playground.audio.decoding import track_from_samples
+from spectrogram_playground.audio.engine import AudioEngine, FakeOutputBackend
+from spectrogram_playground.model import Project
+from spectrogram_playground.ui.main_window import MainWindow
 
 
 def make_track(name: str, duration: float = 0.2):
@@ -225,7 +225,7 @@ def test_record_action_is_wired_and_feedback_is_visible(qtbot) -> None:
 
 
 def test_fourier_analysis_does_not_block_qt_thread(qtbot, monkeypatch) -> None:
-    import src.ui.fourier_view as fourier_module
+    import spectrogram_playground.ui.fourier_view as fourier_module
 
     window = make_window(qtbot)
     window.add_track(make_track("first", 1.0))

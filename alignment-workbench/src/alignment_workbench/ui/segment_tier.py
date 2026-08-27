@@ -64,9 +64,7 @@ class SegmentTier(QtWidgets.QWidget):
             painter.drawText(self._timeline_left + 6, top + 21, title)
             return
         painter.save()
-        painter.setClipRect(
-            QtCore.QRectF(self._timeline_left, top, self._timeline_width, height)
-        )
+        painter.setClipRect(QtCore.QRectF(self._timeline_left, top, self._timeline_width, height))
         for segment in segments:
             left = self._x(segment.start_frame)
             right = self._x(segment.end_frame)
@@ -130,12 +128,9 @@ class SegmentTier(QtWidgets.QWidget):
         event.accept()
 
     def _x(self, frame: int) -> float:
-        return (
-            self._timeline_left
-            + (frame - self.session.viewport.start)
-            * self._timeline_width
-            / max(1, self.session.viewport.width)
-        )
+        return self._timeline_left + (
+            frame - self.session.viewport.start
+        ) * self._timeline_width / max(1, self.session.viewport.width)
 
     def _frame(self, x: float) -> int:
         return round(

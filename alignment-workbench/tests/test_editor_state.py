@@ -150,7 +150,7 @@ def test_track_mutations_emit_targeted_events() -> None:
     )
     session.set_reference_track(second.id)
     session.reorder_track(second.id, -1)
-    session.active_track_id = first.id
+    session.set_active_track(first.id)
     session.split_at(4)
     session.remove_track(second.id)
 
@@ -164,9 +164,10 @@ def test_track_mutations_emit_targeted_events() -> None:
         (SessionEventType.TRACK_LAYOUT, None),
         (SessionEventType.TRACK_ORDER, second.id),
         (SessionEventType.HISTORY, None),
-        (SessionEventType.TRACK_CONTENT, first.id),
+        (SessionEventType.ACTIVE_TRACK, first.id),
+        (SessionEventType.BATCH, first.id),
         (SessionEventType.HISTORY, None),
-        (SessionEventType.TRACK_REMOVED, second.id),
+        (SessionEventType.BATCH, second.id),
     ]
 
 
@@ -210,3 +211,52 @@ def test_revert_restores_saved_effective_revision_not_original_model() -> None:
     session.revert_segment(track.id, "phone")
     reverted = session.segment(track.id, "phone")
     assert (reverted.label, reverted.start_frame, reverted.end_frame) == ("ɛ", 120, 240)
+
+
+@pytest.mark.parametrize("operation", ["cut_selection", "delete_selection"])
+def test_cut_and_delete_clear_selection_and_undo_restores_navigation(operation: str) -> None:
+    session, _track = session_with_track()
+    session.set_playhead(6)
+    session.set_selection(3, 5)
+    session.set_viewport(2, 10)
+    before = (
+        session.playhead_frame,
+        session.selection.start,
+        session.selection.end,
+        session.viewport.start,
+        session.viewport.end,
+    )
+
+    getattr(session, operation)()
+    assert not session.selection.active
+    assert session.playhead_frame == 3
+    session.commands.undo()
+    assert before == (
+        session.playhead_frame,
+        session.selection.start,
+        session.selection.end,
+        session.viewport.start,
+        session.viewport.end,
+    )
+    session.commands.redo()
+    assert not session.selection.active
+    assert session.playhead_frame == 3
+
+
+def test_paste_selects_inserted_range_and_removing_tracks_selects_replacements() -> None:
+    session, first = session_with_track()
+    session.set_selection(2, 5)
+    session.copy_selection()
+    session.set_playhead(8)
+    session.paste()
+    assert (session.selection.start, session.selection.end) == (8, 11)
+    session.commands.undo()
+    session.commands.redo()
+    assert (session.selection.start, session.selection.end) == (8, 11)
+
+    second = session.add_audio_track(np.ones(4), name="second", identity="second")
+    session.set_reference_track(first.id)
+    session.set_active_track(first.id)
+    session.remove_track(first.id)
+    assert session.active_track_id == second.id
+    assert session.reference_track_id == second.id

@@ -6,7 +6,7 @@ a = Analysis(
     ["app.py"],
     pathex=[],
     binaries=binaries,
-    datas=datas + [("src/resources/styles.qss", "src/resources")],
+    datas=datas + [("spectrogram_playground/resources/styles.qss", "spectrogram_playground/resources")],
     hiddenimports=hiddenimports + ["sounddevice", "soundfile", "pyqtgraph"],
 )
 pyz = PYZ(a.pure)

@@ -4,17 +4,23 @@ from uuid import UUID
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from src.analysis.cache import AnalysisCache
-from src.audio.decoding import AudioDecodeError, load_track, track_from_samples
-from src.audio.editing import AudioClip, copy_region, delete_region, move_region, paste_clip
-from src.audio.engine import AudioEngine
-from src.audio.recording import Recorder, RecordingError
-from src.exporting import export_project_json
-from src.fixtures import sine
-from src.model.project import Project
-from src.model.settings import VisualizationTab
-from src.model.track import Track
-from src.model.transport import TransportState
+from spectrogram_playground.analysis.cache import AnalysisCache
+from spectrogram_playground.audio.decoding import AudioDecodeError, load_track, track_from_samples
+from spectrogram_playground.audio.editing import (
+    AudioClip,
+    copy_region,
+    delete_region,
+    move_region,
+    paste_clip,
+)
+from spectrogram_playground.audio.engine import AudioEngine
+from spectrogram_playground.audio.recording import Recorder, RecordingError
+from spectrogram_playground.exporting import export_project_json
+from spectrogram_playground.fixtures import sine
+from spectrogram_playground.model.project import Project
+from spectrogram_playground.model.settings import VisualizationTab
+from spectrogram_playground.model.track import Track
+from spectrogram_playground.model.transport import TransportState
 
 from .analysis_settings import AnalysisSettingsPanel
 from .export_worker import AcousticCsvExportTask
@@ -62,9 +68,7 @@ class MainWindow(QtWidgets.QMainWindow):
         center_layout.addWidget(self.ruler)
         self.tabs = QtWidgets.QTabWidget()
         self._lane_heights: dict[UUID, int] = {}
-        self.waveform = WaveformWorkspace(
-            self.project, self.cache, lane_heights=self._lane_heights
-        )
+        self.waveform = WaveformWorkspace(self.project, self.cache, lane_heights=self._lane_heights)
         self.spectrogram = SpectrogramWorkspace(
             self.project, self.cache, lane_heights=self._lane_heights
         )
@@ -90,7 +94,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().addWidget(self.selection_status, 1)
         self.statusBar().addPermanentWidget(
             QtWidgets.QLabel(
-                f"Playback {self.project.playback_rate / 1000:g} kHz · "
+                f"Playback {self.project.playback_rate / 1000:g} kHz Â· "
                 f"Analysis {self.project.settings.analysis_rate / 1000:g} kHz"
             )
         )
@@ -102,10 +106,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
-        file_menu.addAction("Add track…", self.choose_tracks, QtGui.QKeySequence.StandardKey.Open)
-        file_menu.addAction("Export current view as PNG…", self.export_png)
-        file_menu.addAction("Export F0, F1-F3, and RMS as CSV…", self.export_csv)
-        file_menu.addAction("Export project settings as JSON…", self.export_json)
+        file_menu.addAction("Add trackâ€¦", self.choose_tracks, QtGui.QKeySequence.StandardKey.Open)
+        file_menu.addAction("Export current view as PNGâ€¦", self.export_png)
+        file_menu.addAction("Export F0, F1-F3, and RMS as CSVâ€¦", self.export_csv)
+        file_menu.addAction("Export project settings as JSONâ€¦", self.export_json)
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close, QtGui.QKeySequence.StandardKey.Quit)
         edit_menu = self.menuBar().addMenu("&Edit")
@@ -139,7 +143,7 @@ class MainWindow(QtWidgets.QMainWindow):
         tools_menu = self.menuBar().addMenu("&Tools")
         tools_menu.addAction("Add generated 440 Hz fixture", self.add_demo_track)
         audio_menu = self.menuBar().addMenu("&Audio")
-        audio_menu.addAction("Select input device…", self.choose_input_device)
+        audio_menu.addAction("Select input deviceâ€¦", self.choose_input_device)
 
     def _build_docks(self) -> None:
         self.settings_dock = QtWidgets.QDockWidget("Analysis settings", self)
@@ -578,9 +582,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.recorder.peak_level,
                 self.recorder.device_name,
             )
-            detail = f"Audio device: recording · {self.recorder.device_name}"
+            detail = f"Audio device: recording Â· {self.recorder.device_name}"
             if self.recorder.last_error:
-                detail += f" · {self.recorder.last_error}"
+                detail += f" Â· {self.recorder.last_error}"
             self.device_status.setText(detail)
             self._update_visible_playheads(position)
             return
@@ -619,7 +623,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.project.selection.active:
             track = self.project.track_by_id(self.project.active_track_id)
             self.selection_status.setText(
-                f"{track.name}: {self.project.selection.start:.3f}–"
+                f"{track.name}: {self.project.selection.start:.3f}â€“"
                 f"{self.project.selection.end:.3f} s "
                 f"({self.project.selection.duration:.3f} s)"
             )

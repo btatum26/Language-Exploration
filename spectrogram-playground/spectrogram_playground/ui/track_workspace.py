@@ -6,8 +6,8 @@ from uuid import UUID
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from src.model.project import Project
-from src.model.track import Track
+from spectrogram_playground.model.project import Project
+from spectrogram_playground.model.track import Track
 
 from .linked_view import InteractivePlot, add_timeline_items
 from .track_header import TrackHeader

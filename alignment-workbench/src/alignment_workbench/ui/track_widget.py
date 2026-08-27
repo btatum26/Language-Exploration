@@ -4,7 +4,7 @@ from uuid import UUID
 
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
-from src.ui.linked_view import InteractivePlot, add_timeline_items
+from spectrogram_playground.ui.linked_view import InteractivePlot, add_timeline_items
 
 from alignment_workbench.analysis.tasks import AnalysisCoordinator, TrackAnalysis
 from alignment_workbench.state.editor import (
@@ -216,7 +216,7 @@ class TrackWidget(QtWidgets.QFrame):
         self.name.editingFinished.connect(self._rename)
         layout.addWidget(self.name)
         speaker = self.track.speaker_id or "No speaker"
-        self.metadata = QtWidgets.QLabel(f"{speaker} · {self.track.language}")
+        self.metadata = QtWidgets.QLabel(f"{speaker} Â· {self.track.language}")
         self.metadata.setObjectName("trackMetadata")
         layout.addWidget(self.metadata)
         modes = QtWidgets.QHBoxLayout()
@@ -262,7 +262,7 @@ class TrackWidget(QtWidgets.QFrame):
         self.reference_button.setChecked(self.session.reference_track_id == self.track.id)
         self.reference_button.clicked.connect(lambda: self.reference_requested.emit(self.track.id))
         controls.addWidget(self.reference_button)
-        for label, delta in (("↑", -1), ("↓", 1)):
+        for label, delta in (("â†‘", -1), ("â†“", 1)):
             button = QtWidgets.QToolButton()
             button.setText(label)
             button.clicked.connect(
@@ -270,7 +270,7 @@ class TrackWidget(QtWidgets.QFrame):
             )
             controls.addWidget(button)
         remove = QtWidgets.QToolButton()
-        remove.setText("×")
+        remove.setText("Ã—")
         remove.clicked.connect(lambda: self.remove_requested.emit(self.track.id))
         controls.addWidget(remove)
         layout.addLayout(controls)
@@ -281,27 +281,25 @@ class TrackWidget(QtWidgets.QFrame):
         return header
 
     def refresh_analysis(self) -> None:
-        self.generation += 1
-        self.analysis.invalidate(self.track.id)
+        snapshot = self.session.render_snapshot(self.track.id)
+        self.generation = snapshot.content_version
         self._reset_timeline_cache()
         self._wave_playhead = self._spec_playhead = None
         self._wave_region = self._spec_region = None
-        samples = self.session.render_track(self.track.id)
+        samples = snapshot.samples
         source = self.session.sources[self.track.clips[0].source_id]
         self.details.setText(
-            f"{len(samples) / self.session.sample_rate:.2f}s · "
-            f"{source.original_rate / 1000:g} kHz · {source.channels}ch · "
+            f"{len(samples) / self.session.sample_rate:.2f}s Â· "
+            f"{source.original_rate / 1000:g} kHz Â· {source.channels}ch Â· "
             f"{len(self.track.clips)} clip(s)"
         )
         for plot, label in (
-            (self.waveform, "Preparing waveform…"),
-            (self.spectrogram, "Computing…"),
+            (self.waveform, "Preparing waveformâ€¦"),
+            (self.spectrogram, "Computingâ€¦"),
         ):
             plot.clear()
             plot.addItem(pg.TextItem(label, color="#aeb4bc", anchor=(0, 0)))
-        self.analysis.analyze(
-            self.track.id, self.generation, samples.copy(), self.session.sample_rate
-        )
+        self.analysis.analyze(self.track.id, self.generation, samples, self.session.sample_rate)
         self.update_viewport()
         self.update_playhead()
         self.update_selection()
@@ -450,12 +448,12 @@ class TrackWidget(QtWidgets.QFrame):
     def _seek_seconds(self, seconds: float) -> None:
         if self.session.tool is not ToolMode.SEEK:
             return
-        self.session.active_track_id = self.track.id
+        self.session.set_active_track(self.track.id)
         self.session.set_playhead(round(seconds * self.session.sample_rate))
 
     def _editor_drag_started(self, seconds: float) -> None:
         frame = round(seconds * self.session.sample_rate)
-        self.session.active_track_id = self.track.id
+        self.session.set_active_track(self.track.id)
         self._editor_drag_start = frame
         if self.session.tool is ToolMode.SELECT:
             self.session.set_playhead(frame)
@@ -495,7 +493,7 @@ class TrackWidget(QtWidgets.QFrame):
         self._moving_clip_id = None
 
     def _select_seconds(self, first: float, second: float) -> None:
-        self.session.active_track_id = self.track.id
+        self.session.set_active_track(self.track.id)
         self.session.set_selection(
             round(first * self.session.sample_rate), round(second * self.session.sample_rate)
         )
@@ -522,6 +520,7 @@ class TrackWidget(QtWidgets.QFrame):
                 provenance=segment.provenance,
                 effective_revision_id=segment.effective_revision_id,
                 model_segment_id=segment.model_segment_id,
+                topology_version=segment.topology_version,
                 saved_label=segment.saved_label,
                 saved_start_frame=segment.saved_start_frame,
                 saved_end_frame=segment.saved_end_frame,

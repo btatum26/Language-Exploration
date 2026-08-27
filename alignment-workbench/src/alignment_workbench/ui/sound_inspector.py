@@ -1,19 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from uuid import UUID
 
 from PySide6 import QtCore, QtWidgets
 
 from alignment_workbench.services.models import RevisionRequest
 from alignment_workbench.services.registry import RegistryServices
-from alignment_workbench.services.tasks import TaskManager
+from alignment_workbench.services.tasks import DuplicateTaskError, TaskManager
 from alignment_workbench.state.editor import (
     EditorSession,
     Segment,
     SessionEvent,
     SessionEventType,
 )
+from alignment_workbench.ui.ab_comparison import corresponding_segment
 from alignment_workbench.ui.ipa_keyboard import IpaLineEdit
+
+
+@dataclass(frozen=True, slots=True)
+class PendingRevision:
+    targets: frozenset[tuple[UUID, str]]
+    requested_state: str
 
 
 class SoundInspector(QtWidgets.QWidget):
@@ -33,7 +41,7 @@ class SoundInspector(QtWidgets.QWidget):
         self.services = services
         self.tasks = tasks
         self.current: tuple[object, str] | None = None
-        self._pending_revision_segments: set[tuple[object, str]] = set()
+        self._pending_revisions: dict[UUID, PendingRevision] = {}
         self._build()
         session.subscribe(self._state_changed)
         tasks.completed.connect(self._task_completed)
@@ -101,10 +109,13 @@ class SoundInspector(QtWidgets.QWidget):
         self._set_enabled(False)
 
     def _state_changed(self, event: SessionEvent) -> None:
-        if event.reason not in {
-            SessionEventType.SEGMENT_SELECTION,
-            SessionEventType.SEGMENTS,
-        }:
+        changes = event.changes if event.reason is SessionEventType.BATCH else {event.reason}
+        if not changes.intersection(
+            {
+                SessionEventType.SEGMENT_SELECTION,
+                SessionEventType.SEGMENTS,
+            }
+        ):
             return
         selection = self.session.selected_segment
         if selection is None:
@@ -149,12 +160,9 @@ class SoundInspector(QtWidgets.QWidget):
             return "Select a practice track"
         track = self.session.track(track_id)  # type: ignore[arg-type]
         reference = self.session.track(reference_id)
-        source = track.words if segment.kind == "word" else track.phones
-        target = reference.words if segment.kind == "word" else reference.phones
-        index = next((index for index, item in enumerate(source) if item.id == segment.id), -1)
-        if index < 0 or index >= len(target):
+        other = corresponding_segment(track, reference, segment)
+        if other is None:
             return "No corresponding reference segment"
-        other = target[index]
         duration_delta = (
             segment.duration_frames - other.duration_frames
         ) / self.session.sample_rate
@@ -206,14 +214,11 @@ class SoundInspector(QtWidgets.QWidget):
             end_sample=round(segment.end_frame * rate / self.session.sample_rate),
             label=segment.label,
             review_state=state,
+            affected_segment_ids=(segment.id,),
+            base_topology_version=segment.topology_version,
         )
         self.status.setText("Saving immutable revision…")
-        self._pending_revision_segments = {self.current}
-        self.tasks.submit(
-            "revision",
-            lambda _cancel, _progress: self.services.save_revision(request),
-            replace=True,
-        )
+        self._submit_revision(request, {(track_id, segment_id)})
 
     def revert(self) -> None:
         if self.current is not None:
@@ -252,7 +257,7 @@ class SoundInspector(QtWidgets.QWidget):
         collection[index : index + 1] = [first, second]
         self.session.unsaved_alignment_edits[(track_id, first.id)] = first
         self.session.unsaved_alignment_edits[(track_id, second.id)] = second
-        self._pending_revision_segments = {(track_id, first.id), (track_id, second.id)}
+        pending = {(track_id, first.id), (track_id, second.id)}
         self.session.select_segment(track_id, second.id)
         rate = segment.timebase_sample_rate_hz
         request = RevisionRequest(
@@ -263,7 +268,7 @@ class SoundInspector(QtWidgets.QWidget):
             label=None,
             review_state="accepted",
             operation="split",
-            affected_segment_ids=(source_id,),
+            affected_segment_ids=(segment.id,),
             replacement_segments=(
                 {
                     "segment_id": first.id,
@@ -280,12 +285,9 @@ class SoundInspector(QtWidgets.QWidget):
                     "parent_segment_id": second.parent_id,
                 },
             ),
+            base_topology_version=segment.topology_version,
         )
-        self.tasks.submit(
-            "revision",
-            lambda _cancel, _progress: self.services.save_revision(request),
-            replace=True,
-        )
+        self._submit_revision(request, pending)
         self.status.setText("Saving split revision…")
 
     def merge(self, delta: int) -> None:
@@ -324,7 +326,7 @@ class SoundInspector(QtWidgets.QWidget):
         first = min(index, other_index)
         collection[first : first + 2] = [merged]
         self.session.unsaved_alignment_edits[(track_id, merged.id)] = merged
-        self._pending_revision_segments = {(track_id, merged.id)}
+        pending = {(track_id, merged.id)}
         self.session.select_segment(track_id, merged.id)
         rate = merged.timebase_sample_rate_hz
         request = RevisionRequest(
@@ -335,7 +337,7 @@ class SoundInspector(QtWidgets.QWidget):
             label=None,
             review_state="accepted",
             operation="merge",
-            affected_segment_ids=(left_source, right_source),
+            affected_segment_ids=(left.id, right.id),
             replacement_segments=(
                 {
                     "segment_id": merged.id,
@@ -345,12 +347,9 @@ class SoundInspector(QtWidgets.QWidget):
                     "parent_segment_id": merged.parent_id,
                 },
             ),
+            base_topology_version=max(left.topology_version, right.topology_version),
         )
-        self.tasks.submit(
-            "revision",
-            lambda _cancel, _progress: self.services.save_revision(request),
-            replace=True,
-        )
+        self._submit_revision(request, pending)
         self.status.setText("Saving merge revision…")
 
     def _load_history(self, segment_id: str) -> None:
@@ -368,9 +367,12 @@ class SoundInspector(QtWidgets.QWidget):
         )
 
     @QtCore.Slot(str, object, object)
-    def _task_completed(self, category: str, _request_id: object, result: object) -> None:
+    def _task_completed(self, category: str, request_id: object, result: object) -> None:
         if category == "revision":
-            targets = self._pending_revision_segments or ({self.current} if self.current else set())
+            pending = self._pending_revisions.pop(request_id, None)  # type: ignore[arg-type]
+            if pending is None:
+                return
+            targets = pending.targets
             accepted = str(result["review_state"]) == "accepted"  # type: ignore[index]
             for target in tuple(targets):
                 track_id, segment_id = target
@@ -378,22 +380,41 @@ class SoundInspector(QtWidgets.QWidget):
                     segment = self.session.segment(track_id, segment_id)  # type: ignore[arg-type]
                 except StopIteration:
                     continue
+                if not accepted:
+                    self.session.update_segment(
+                        track_id,
+                        replace(
+                            segment,
+                            label=segment.saved_label or segment.label,
+                            start_frame=(
+                                segment.saved_start_frame
+                                if segment.saved_start_frame is not None
+                                else segment.start_frame
+                            ),
+                            end_frame=(
+                                segment.saved_end_frame
+                                if segment.saved_end_frame is not None
+                                else segment.end_frame
+                            ),
+                            review_state=str(result["review_state"]),  # type: ignore[index]
+                        ),
+                        unsaved=False,
+                    )
+                    continue
                 self.session.update_segment(
                     track_id,  # type: ignore[arg-type]
                     replace(
                         segment,
                         review_state=str(result["review_state"]),  # type: ignore[index]
-                        saved_label=segment.label if accepted else segment.saved_label,
-                        saved_start_frame=(
-                            segment.start_frame if accepted else segment.saved_start_frame
-                        ),
-                        saved_end_frame=(
-                            segment.end_frame if accepted else segment.saved_end_frame
+                        saved_label=segment.label,
+                        saved_start_frame=segment.start_frame,
+                        saved_end_frame=segment.end_frame,
+                        topology_version=int(
+                            result.get("topology_version", segment.topology_version)  # type: ignore[union-attr]
                         ),
                     ),
                     unsaved=False,
                 )
-            self._pending_revision_segments.clear()
             self.status.setText("Revision saved")
         elif category == "revision-history":
             self.history.clear()
@@ -405,9 +426,25 @@ class SoundInspector(QtWidgets.QWidget):
                 )
 
     @QtCore.Slot(str, object, str)
-    def _task_failed(self, category: str, _request_id: object, message: str) -> None:
+    def _task_failed(self, category: str, request_id: object, message: str) -> None:
         if category in {"revision", "revision-history"}:
             if category == "revision":
-                self._pending_revision_segments.clear()
+                self._pending_revisions.pop(request_id, None)  # type: ignore[arg-type]
             self.status.setText(message)
             self.error.emit(message)
+
+    def _submit_revision(self, request: RevisionRequest, targets: set[tuple[UUID, str]]) -> None:
+        assert self.services is not None
+        try:
+            request_id = self.tasks.submit(
+                "revision",
+                lambda _cancel, _progress: self.services.save_revision(request),
+                mutation=True,
+            )
+        except DuplicateTaskError as exc:
+            self.status.setText(str(exc))
+            self.error.emit(str(exc))
+            return
+        self._pending_revisions[request_id] = PendingRevision(
+            frozenset(targets), request.review_state
+        )

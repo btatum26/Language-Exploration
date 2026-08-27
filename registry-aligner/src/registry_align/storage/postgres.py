@@ -25,7 +25,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from registry_align.domain.audio import PreparedRecording
 from registry_align.domain.entries import RegistryEntry
 from registry_align.domain.segments import AlignmentSegment, SegmentRevision
+from registry_align.domain.topology import replay_effective_topology
 from registry_align.domain.transcripts import NormalizedTranscript
+from registry_align.errors import ConfigurationError
 from registry_align.events import Issue
 from registry_align.storage.repository import AlignmentClaim, UnitOfWork, VersionIngestion
 from registry_align.storage.tables import (
@@ -436,6 +438,14 @@ class PostgresRepository:
         offset: int,
         limit: int,
     ) -> dict[str, Any]:
+        latest = segment_revisions.alias("latest_revision")
+        latest_for_segment = (
+            select(latest.c.id)
+            .where(latest.c.segment_id == segments.c.id)
+            .order_by(latest.c.created_at.desc(), latest.c.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
         accepted = exists(
             select(segment_revisions.c.id)
             .select_from(segment_revisions)
@@ -443,6 +453,7 @@ class PostgresRepository:
             .where(
                 segments.c.alignment_result_id == recording_versions.c.current_alignment_result_id,
                 segment_revisions.c.review_state == "accepted",
+                segment_revisions.c.id == latest_for_segment,
             )
         )
         rejected = exists(
@@ -452,6 +463,7 @@ class PostgresRepository:
             .where(
                 segments.c.alignment_result_id == recording_versions.c.current_alignment_result_id,
                 segment_revisions.c.review_state == "rejected",
+                segment_revisions.c.id == latest_for_segment,
             )
         )
         proposed = exists(
@@ -461,6 +473,7 @@ class PostgresRepository:
             .where(
                 segments.c.alignment_result_id == recording_versions.c.current_alignment_result_id,
                 segment_revisions.c.review_state == "proposed",
+                segment_revisions.c.id == latest_for_segment,
             )
         )
         review_expression = case(
@@ -644,31 +657,10 @@ class PostgresRepository:
         return [dict(row) for row in self.connection.execute(statement).mappings()]
 
     def effective_segments(self, recording_id: str | None = None) -> list[dict[str, Any]]:
-        latest_revision = (
-            select(segment_revisions.c.id)
-            .where(
-                and_(
-                    segment_revisions.c.segment_id == segments.c.id,
-                    segment_revisions.c.review_state == "accepted",
-                )
-            )
-            .correlate(segments)
-            .order_by(segment_revisions.c.created_at.desc())
-            .limit(1)
-            .scalar_subquery()
-        )
         statement = (
             select(
                 segments,
                 recordings.c.id.label("recording_id"),
-                segment_revisions.c.id.label("effective_revision_id"),
-                segment_revisions.c.start_sample_override,
-                segment_revisions.c.end_sample_override,
-                segment_revisions.c.label_override,
-                segment_revisions.c.review_state.label("effective_review_state"),
-                segment_revisions.c.operation,
-                segment_revisions.c.affected_segment_ids,
-                segment_revisions.c.replacement_segments,
             )
             .join(alignment_results, alignment_results.c.id == segments.c.alignment_result_id)
             .join(
@@ -682,60 +674,45 @@ class PostgresRepository:
                 recordings,
                 recordings.c.current_version_id == recording_versions.c.id,
             )
-            .outerjoin(segment_revisions, segment_revisions.c.id == latest_revision)
             .where(alignment_results.c.status == "complete")
-            .order_by(recordings.c.id, segments.c.start_sample, segments.c.kind)
+            .order_by(recordings.c.id, segments.c.start_sample, segments.c.kind, segments.c.id)
         )
         if recording_id is not None:
             statement = statement.where(recordings.c.id == recording_id)
         sources = [dict(source) for source in self.connection.execute(statement).mappings()]
-        absorbed: set[str] = set()
-        for row in sources:
-            if row.get("operation") != "merge":
-                continue
-            base_id = str(row["id"])
-            absorbed.update(
-                str(item) for item in row.get("affected_segment_ids") or [] if str(item) != base_id
-            )
-
+        alignment_ids = {row["alignment_result_id"] for row in sources}
+        revisions: list[dict[str, Any]] = []
+        if alignment_ids:
+            revisions = [
+                dict(row)
+                for row in self.connection.execute(
+                    select(segment_revisions)
+                    .join(segments, segments.c.id == segment_revisions.c.segment_id)
+                    .where(segments.c.alignment_result_id.in_(alignment_ids))
+                    .order_by(segment_revisions.c.created_at, segment_revisions.c.id)
+                ).mappings()
+            ]
         output: list[dict[str, Any]] = []
-        for row in sources:
-            if str(row["id"]) in absorbed:
-                continue
-            row["model_segment_id"] = str(row["id"])
-            row["model_start_sample"] = row["start_sample"]
-            row["model_end_sample"] = row["end_sample"]
-            row["model_label"] = row["label"]
-            if row.get("effective_review_state"):
-                row["review_state"] = row["effective_review_state"]
-            replacements = row.get("replacement_segments") or []
-            if row.get("operation") in {"split", "merge"} and replacements:
-                for replacement in replacements:
-                    effective = dict(row)
-                    effective["id"] = replacement["segment_id"]
-                    effective["label"] = replacement["label"]
-                    effective["start_sample"] = replacement["start_sample"]
-                    effective["end_sample"] = replacement["end_sample"]
-                    effective["parent_segment_id"] = replacement.get("parent_segment_id")
-                    effective["start_s"] = (
-                        effective["start_sample"] / effective["timebase_sample_rate_hz"]
+        for alignment_id in alignment_ids:
+            topology = replay_effective_topology(
+                [row for row in sources if row["alignment_result_id"] == alignment_id],
+                [
+                    row
+                    for row in revisions
+                    if any(
+                        str(source["id"]) == str(row["segment_id"])
+                        for source in sources
+                        if source["alignment_result_id"] == alignment_id
                     )
-                    effective["end_s"] = (
-                        effective["end_sample"] / effective["timebase_sample_rate_hz"]
-                    )
-                    effective["tier"] = effective.pop("kind")
-                    output.append(effective)
-                continue
-            if row["start_sample_override"] is not None:
-                row["start_sample"] = row["start_sample_override"]
-            if row["end_sample_override"] is not None:
-                row["end_sample"] = row["end_sample_override"]
-            if row["label_override"] is not None:
-                row["label"] = row["label_override"]
-            row["start_s"] = row["start_sample"] / row["timebase_sample_rate_hz"]
-            row["end_s"] = row["end_sample"] / row["timebase_sample_rate_hz"]
-            row["tier"] = row.pop("kind")
-            output.append(row)
+                ],
+            )
+            for source in topology.segments:
+                row = dict(source)
+                row["start_s"] = row["start_sample"] / row["timebase_sample_rate_hz"]
+                row["end_s"] = row["end_sample"] / row["timebase_sample_rate_hz"]
+                row["tier"] = row.pop("kind")
+                row["topology_version"] = topology.version
+                output.append(row)
         return sorted(
             output,
             key=lambda item: (item["recording_id"], item["start_sample"], item["tier"]),
@@ -759,6 +736,52 @@ class PostgresRepository:
         statement = select(segments).where(segments.c.id.in_(identifiers))
         return [dict(row) for row in self.connection.execute(statement).mappings()]
 
+    def alignment_topology(
+        self, base_run_id: str, *, lock: bool = False
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        try:
+            alignment_id = UUID(base_run_id)
+        except ValueError as exc:
+            raise ConfigurationError(
+                "base_run_id must identify the current alignment; reload and retry"
+            ) from exc
+        current = (
+            select(alignment_results.c.id)
+            .join(
+                recording_versions,
+                recording_versions.c.id == alignment_results.c.recording_version_id,
+            )
+            .where(
+                alignment_results.c.id == alignment_id,
+                alignment_results.c.status == "complete",
+                recording_versions.c.current_alignment_result_id == alignment_results.c.id,
+            )
+        )
+        if lock:
+            current = current.with_for_update(of=alignment_results)
+        if self.connection.execute(current).scalar_one_or_none() is None:
+            raise ConfigurationError(
+                "base_run_id is not the current completed alignment; reload the recording"
+            )
+        model_rows = [
+            dict(row)
+            for row in self.connection.execute(
+                select(segments)
+                .where(segments.c.alignment_result_id == alignment_id)
+                .order_by(segments.c.kind, segments.c.start_sample, segments.c.id)
+            ).mappings()
+        ]
+        revision_rows = [
+            dict(row)
+            for row in self.connection.execute(
+                select(segment_revisions)
+                .join(segments, segments.c.id == segment_revisions.c.segment_id)
+                .where(segments.c.alignment_result_id == alignment_id)
+                .order_by(segment_revisions.c.created_at, segment_revisions.c.id)
+            ).mappings()
+        ]
+        return model_rows, revision_rows
+
     def save_revision(self, revision: SegmentRevision) -> UUID:
         revision_id = UUID(revision.revision_id) if revision.revision_id else uuid4()
         self.connection.execute(
@@ -774,9 +797,11 @@ class PostgresRepository:
                 reason=revision.reason,
                 operation=revision.operation,
                 affected_segment_ids=list(revision.affected_segment_ids),
+                effective_target_segment_ids=list(revision.effective_target_segment_ids),
                 replacement_segments=[
                     item.model_dump(mode="json") for item in revision.replacement_segments
                 ],
+                base_topology_version=revision.base_topology_version,
                 created_at=revision.created_at,
             )
         )

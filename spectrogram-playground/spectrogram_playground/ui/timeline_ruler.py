@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.model.project import Project
+from spectrogram_playground.model.project import Project
 
 from .linked_view import InteractivePlot, add_timeline_items
 

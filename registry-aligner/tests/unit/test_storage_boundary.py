@@ -34,7 +34,7 @@ def test_metadata_contains_only_postgresql_tables() -> None:
 def test_packaged_alembic_history_has_remote_audio_head() -> None:
     from alembic.script import ScriptDirectory
 
-    assert ScriptDirectory.from_config(alembic_config()).get_current_head() == "20260824_0004"
+    assert ScriptDirectory.from_config(alembic_config()).get_current_head() == "20260826_0005"
 
 
 def test_postgresql_schema_compiles() -> None:

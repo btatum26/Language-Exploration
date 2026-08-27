@@ -1,14 +1,34 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
+from uuid import UUID
 
 import numpy as np
 import soundfile as sf
 from PySide6 import QtCore, QtWidgets
-from src.audio.recording import InputDevice, Recorder, RecordingError
+from spectrogram_playground.audio.recording import InputDevice, Recorder, RecordingError
 
 from alignment_workbench.services.models import IngestRequest
 from alignment_workbench.services.tasks import TaskManager
+
+
+class AudioFileOwnership(StrEnum):
+    APP_TEMPORARY = "app-temporary"
+    USER_IMPORTED = "user-imported"
+    USER_EXPORTED = "user-exported"
+    BACKEND_MANAGED = "backend-managed"
+
+
+@dataclass(frozen=True, slots=True)
+class AudioArtifact:
+    path: Path
+    ownership: AudioFileOwnership
+
+    def cleanup(self) -> None:
+        if self.ownership is AudioFileOwnership.APP_TEMPORARY and self.path.is_absolute():
+            self.path.unlink(missing_ok=True)
 
 
 class RecordingPanel(QtWidgets.QWidget):
@@ -21,7 +41,8 @@ class RecordingPanel(QtWidgets.QWidget):
         super().__init__(parent)
         self.tasks = tasks
         self.recorder = Recorder()
-        self.take_path: Path | None = None
+        self._artifact: AudioArtifact | None = None
+        self._take_write: UUID | None = None
         self._build()
         self.level_timer = QtCore.QTimer(self)
         self.level_timer.setInterval(50)
@@ -29,6 +50,21 @@ class RecordingPanel(QtWidgets.QWidget):
         tasks.completed.connect(self._task_completed)
         tasks.failed.connect(self._task_failed)
         QtCore.QTimer.singleShot(0, self.refresh_devices)
+
+    @property
+    def take_path(self) -> Path | None:
+        return self._artifact.path if self._artifact is not None else None
+
+    @take_path.setter
+    def take_path(self, value: Path | None) -> None:
+        self._replace_artifact(
+            AudioArtifact(Path(value), AudioFileOwnership.BACKEND_MANAGED)
+            if value is not None
+            else None
+        )
+
+    def set_artifact(self, path: Path, ownership: AudioFileOwnership) -> None:
+        self._replace_artifact(AudioArtifact(Path(path), ownership))
 
     def _build(self) -> None:
         layout = QtWidgets.QGridLayout(self)
@@ -38,7 +74,7 @@ class RecordingPanel(QtWidgets.QWidget):
         self.speaker.setEditable(True)
         layout.addWidget(self.speaker, 0, 1)
         new_speaker = QtWidgets.QToolButton()
-        new_speaker.setText("New…")
+        new_speaker.setText("Newâ€¦")
         new_speaker.clicked.connect(self.create_speaker)
         layout.addWidget(new_speaker, 0, 2)
         layout.addWidget(QtWidgets.QLabel("Language"), 0, 3)
@@ -121,7 +157,7 @@ class RecordingPanel(QtWidgets.QWidget):
         )
 
     def refresh_devices(self) -> None:
-        self.status.setText("Querying input devices…")
+        self.status.setText("Querying input devicesâ€¦")
         self.tasks.submit(
             "input-devices",
             lambda _cancel, _progress: self.recorder.available_devices(),
@@ -144,9 +180,10 @@ class RecordingPanel(QtWidgets.QWidget):
         except RecordingError as exc:
             self.error.emit(str(exc))
             return
-        self.take_path = None
+        self._cancel_pending_write()
+        self._cleanup_artifact()
         self.level_timer.start()
-        self.status.setText("Recording…")
+        self.status.setText("Recordingâ€¦")
 
     def stop(self) -> None:
         try:
@@ -165,29 +202,46 @@ class RecordingPanel(QtWidgets.QWidget):
         )
         destination = directory / f"take-{QtCore.QDateTime.currentMSecsSinceEpoch()}.wav"
         rate = self.recorder.sample_rate
-        self.status.setText("Writing take…")
+        self.status.setText("Writing takeâ€¦")
 
-        def write_take(_cancel: object, _progress: object) -> tuple[Path, float]:
+        def write_take(cancel: object, _progress: object) -> tuple[Path, float]:
             directory.mkdir(parents=True, exist_ok=True)
-            sf.write(destination, np.asarray(samples, dtype=np.float32), rate)
-            return destination, len(samples) / rate
+            if cancel.is_set():  # type: ignore[attr-defined]
+                return destination, 0.0
+            try:
+                sf.write(destination, np.asarray(samples, dtype=np.float32), rate)
+                if cancel.is_set():  # type: ignore[attr-defined]
+                    destination.unlink(missing_ok=True)
+                return destination, len(samples) / rate
+            except Exception:
+                destination.unlink(missing_ok=True)
+                raise
 
-        self.tasks.submit("take-write", write_take, replace=True)
+        self._cancel_pending_write()
+        self._take_write = self.tasks.submit("take-write", write_take, mutation=True)
 
     @QtCore.Slot(str, object, object)
-    def _task_completed(self, category: str, _request_id: object, result: object) -> None:
+    def _task_completed(self, category: str, request_id: object, result: object) -> None:
         if category == "input-devices":
             self._set_devices(result)  # type: ignore[arg-type]
         elif category == "take-write":
-            self.take_path, duration = result  # type: ignore[misc]
-            self.status.setText(f"Take ready · {duration:.2f}s")
+            path, duration = result  # type: ignore[misc]
+            artifact = AudioArtifact(Path(path), AudioFileOwnership.APP_TEMPORARY)
+            if request_id != self._take_write:
+                artifact.cleanup()
+                return
+            self._take_write = None
+            self._replace_artifact(artifact)
+            self.status.setText(f"Take ready Â· {duration:.2f}s")
             self.preview_audio.emit(self.take_path, "recording")
 
     @QtCore.Slot(str, object, str)
-    def _task_failed(self, category: str, _request_id: object, message: str) -> None:
+    def _task_failed(self, category: str, request_id: object, message: str) -> None:
         if category in {"input-devices", "take-write"}:
             self.status.setText(message)
             if category == "take-write":
+                if request_id == self._take_write:
+                    self._take_write = None
                 self.error.emit(message)
 
     def cancel(self) -> None:
@@ -197,9 +251,8 @@ class RecordingPanel(QtWidgets.QWidget):
             except RecordingError:
                 pass
         self.level_timer.stop()
-        if self.take_path is not None and self.take_path.is_file():
-            self.take_path.unlink(missing_ok=True)
-        self.take_path = None
+        self._cancel_pending_write()
+        self._cleanup_artifact()
         self.status.setText("Cancelled; nothing was saved")
 
     def import_audio(self) -> None:
@@ -210,7 +263,7 @@ class RecordingPanel(QtWidgets.QWidget):
             "Audio (*.wav *.flac *.ogg *.mp3);;All files (*)",
         )
         if value:
-            self.take_path = Path(value)
+            self._replace_artifact(AudioArtifact(Path(value), AudioFileOwnership.USER_IMPORTED))
             self.status.setText(f"Imported {self.take_path.name}; preview before saving")
             self.preview_audio.emit(self.take_path, "import")
 
@@ -242,4 +295,23 @@ class RecordingPanel(QtWidgets.QWidget):
         self.level.setValue(round(min(1.0, self.recorder.peak_level) * 100))
 
     def close(self) -> None:
+        self._cancel_pending_write()
+        self._cleanup_artifact()
         self.recorder.close()
+
+    def _cancel_pending_write(self) -> None:
+        if self._take_write is None:
+            return
+        self.tasks.cancel("take-write")
+        self._take_write = None
+
+    def _replace_artifact(self, artifact: AudioArtifact | None) -> None:
+        if self._artifact == artifact:
+            return
+        self._cleanup_artifact()
+        self._artifact = artifact
+
+    def _cleanup_artifact(self) -> None:
+        artifact, self._artifact = self._artifact, None
+        if artifact is not None:
+            artifact.cleanup()

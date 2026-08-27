@@ -27,12 +27,15 @@ class ToolMode(StrEnum):
 
 
 class SessionEventType(StrEnum):
+    BATCH = "batch"
+    ACTIVE_TRACK = "active-track"
     VIEWPORT = "viewport"
     PLAYHEAD = "playhead"
     SELECTION = "selection"
     SEGMENT_SELECTION = "segment-selection"
     SEGMENTS = "segments"
     TRACK_CONTENT = "track-content"
+    RENDER_READY = "render-ready"
     TRACK_MIX = "track-mix"
     TRACK_LAYOUT = "track-layout"
     TRACK_ORDER = "track-order"
@@ -49,6 +52,7 @@ class SessionEvent:
 
     reason: SessionEventType
     track_id: UUID | None = None
+    changes: frozenset[SessionEventType] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +69,7 @@ class AudioSource:
         if self.sample_rate <= 0 or self.original_rate <= 0 or self.channels <= 0:
             raise ValueError("Audio source rates and channels must be positive")
         values = np.asarray(self.samples, dtype=np.float32).reshape(-1)
+        values.setflags(write=False)
         object.__setattr__(self, "samples", values)
 
     @property
@@ -115,6 +120,7 @@ class Segment:
     provenance: dict[str, object] = field(default_factory=dict, compare=False)
     effective_revision_id: str | None = None
     model_segment_id: str | None = None
+    topology_version: int = 0
     saved_label: str | None = None
     saved_start_frame: int | None = None
     saved_end_frame: int | None = None
@@ -149,10 +155,27 @@ class EditorTrack:
     words: list[Segment] = field(default_factory=list)
     phones: list[Segment] = field(default_factory=list)
     alignment_offset_frames: int = 0
+    content_version: int = 0
 
     @property
     def end_frame(self) -> int:
         return max((clip.timeline_end_frame for clip in self.clips), default=0)
+
+
+@dataclass(frozen=True, slots=True)
+class RenderSnapshot:
+    track_id: UUID
+    content_version: int
+    samples: np.ndarray = field(compare=False, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class RenderPlan:
+    track_id: UUID
+    content_version: int
+    frame_count: int
+    clips: tuple[Clip, ...]
+    sources: dict[UUID, AudioSource] = field(compare=False, repr=False)
 
 
 class EditorSession:
@@ -178,6 +201,7 @@ class EditorSession:
         self.unsaved_alignment_edits: dict[tuple[UUID, str], Segment] = {}
         self.timeline_dirty = False
         self._listeners: list[Callable[[SessionEvent], None]] = []
+        self._render_snapshots: dict[UUID, RenderSnapshot] = {}
         self.commands = CommandStack(lambda: self._emit(SessionEventType.HISTORY))
 
     def subscribe(self, callback: Callable[[SessionEvent], None]) -> Callable[[], None]:
@@ -191,6 +215,11 @@ class EditorSession:
 
     def _emit(self, reason: SessionEventType, track_id: UUID | None = None) -> None:
         event = SessionEvent(reason, track_id)
+        for callback in tuple(self._listeners):
+            callback(event)
+
+    def _emit_batch(self, changes: set[SessionEventType], track_id: UUID | None = None) -> None:
+        event = SessionEvent(SessionEventType.BATCH, track_id, frozenset(changes))
         for callback in tuple(self._listeners):
             callback(event)
 
@@ -255,6 +284,10 @@ class EditorSession:
             phones=list(phones or []),
         )
         self.tracks.append(track)
+        source.samples.setflags(write=False)
+        self._render_snapshots[track.id] = RenderSnapshot(
+            track.id, track.content_version, source.samples
+        )
         self.active_track_id = track.id
         if self.reference_track_id is None:
             self.reference_track_id = track.id
@@ -305,14 +338,18 @@ class EditorSession:
     def remove_track(self, track_id: UUID) -> None:
         index = next(index for index, item in enumerate(self.tracks) if item.id == track_id)
         self.tracks.pop(index)
+        self._render_snapshots.pop(track_id, None)
+        changes = {SessionEventType.TRACK_REMOVED}
         if self.active_track_id == track_id:
             self.active_track_id = (
                 self.tracks[min(index, len(self.tracks) - 1)].id if self.tracks else None
             )
+            changes.add(SessionEventType.ACTIVE_TRACK)
         if self.reference_track_id == track_id:
             self.reference_track_id = self.tracks[0].id if self.tracks else None
+            changes.add(SessionEventType.TRACK_LAYOUT)
         self._clamp_timeline()
-        self._emit(SessionEventType.TRACK_REMOVED, track_id)
+        self._emit_batch(changes, track_id)
 
     def reorder_track(self, track_id: UUID, delta: int) -> None:
         old = next(index for index, item in enumerate(self.tracks) if item.id == track_id)
@@ -384,6 +421,14 @@ class EditorSession:
         self.reference_track_id = track_id
         self._emit(SessionEventType.TRACK_LAYOUT)
 
+    def set_active_track(self, track_id: UUID | None) -> None:
+        if track_id is not None:
+            self.track(track_id)
+        if self.active_track_id == track_id:
+            return
+        self.active_track_id = track_id
+        self._emit(SessionEventType.ACTIVE_TRACK, track_id)
+
     def set_viewport(self, start: int, end: int) -> None:
         before = (self.viewport.start, self.viewport.end)
         self.viewport.set(start, end, self.total_frames)
@@ -435,7 +480,15 @@ class EditorSession:
         self.selected_segment = (track_id, segment_id)
         self.selection.set(segment.start_frame, segment.end_frame, self.total_frames)
         self.playhead_frame = segment.start_frame
-        self._emit(SessionEventType.SEGMENT_SELECTION, track_id)
+        self._emit_batch(
+            {
+                SessionEventType.ACTIVE_TRACK,
+                SessionEventType.SEGMENT_SELECTION,
+                SessionEventType.SELECTION,
+                SessionEventType.PLAYHEAD,
+            },
+            track_id,
+        )
         return segment
 
     def update_segment(self, track_id: UUID, updated: Segment, *, unsaved: bool = True) -> None:
@@ -467,11 +520,53 @@ class EditorSession:
         self.update_segment(track_id, original, unsaved=False)
 
     def render_track(self, track_id: UUID) -> np.ndarray:
+        return self.render_snapshot(track_id).samples
+
+    def render_snapshot(self, track_id: UUID) -> RenderSnapshot:
         track = self.track(track_id)
-        frame_count = track.end_frame
+        cached = self._render_snapshots.get(track_id)
+        if cached is not None and cached.content_version == track.content_version:
+            return cached
+        snapshot = self.compose_render_plan(self.capture_render_plan(track_id))
+        self._render_snapshots[track_id] = snapshot
+        return snapshot
+
+    def prepared_render_snapshot(self, track_id: UUID) -> RenderSnapshot | None:
+        track = self.track(track_id)
+        snapshot = self._render_snapshots.get(track_id)
+        return (
+            snapshot
+            if snapshot is not None and snapshot.content_version == track.content_version
+            else None
+        )
+
+    def capture_render_plan(self, track_id: UUID) -> RenderPlan:
+        track = self.track(track_id)
+        return RenderPlan(
+            track.id,
+            track.content_version,
+            track.end_frame,
+            tuple(track.clips),
+            {clip.source_id: self.sources[clip.source_id] for clip in track.clips},
+        )
+
+    def install_render_snapshot(self, snapshot: RenderSnapshot) -> bool:
+        try:
+            track = self.track(snapshot.track_id)
+        except StopIteration:
+            return False
+        if track.content_version != snapshot.content_version:
+            return False
+        self._render_snapshots[track.id] = snapshot
+        self._emit(SessionEventType.RENDER_READY, track.id)
+        return True
+
+    @staticmethod
+    def compose_render_plan(plan: RenderPlan) -> RenderSnapshot:
+        frame_count = plan.frame_count
         output = np.zeros(max(1, frame_count), dtype=np.float32)
-        for clip in track.clips:
-            source = self.sources[clip.source_id]
+        for clip in plan.clips:
+            source = plan.sources[clip.source_id]
             values = source.samples[clip.source_start_frame : clip.source_end_frame]
             start, end = clip.timeline_start_frame, clip.timeline_end_frame
             if clip.gain == 1.0:
@@ -479,7 +574,8 @@ class EditorSession:
             else:
                 output[start:end] += values * clip.gain
         np.clip(output, -1.0, 1.0, out=output)
-        return output
+        output.setflags(write=False)
+        return RenderSnapshot(plan.track_id, plan.content_version, output)
 
     def split_at(self, frame: int | None = None) -> None:
         track = self._require_active_track()
@@ -542,9 +638,9 @@ class EditorSession:
         after = self._delete_range(track.clips, start, end)
         if not after:
             raise ValueError("Delete the track instead of deleting all of its audio")
-        self._push_clip_edit(track, "Delete audio", after)
-        self.selection.clear()
-        self.playhead_frame = start
+        self._push_clip_edit(
+            track, "Delete audio", after, after_selection=None, after_playhead=start
+        )
 
     def cut_selection(self) -> None:
         self.copy_selection()
@@ -553,9 +649,7 @@ class EditorSession:
         after = self._delete_range(track.clips, start, end)
         if not after:
             raise ValueError("Delete the track instead of cutting all of its audio")
-        self._push_clip_edit(track, "Cut audio", after)
-        self.selection.clear()
-        self.playhead_frame = start
+        self._push_clip_edit(track, "Cut audio", after, after_selection=None, after_playhead=start)
 
     def paste(self, frame: int | None = None) -> None:
         if not self.clipboard:
@@ -587,9 +681,12 @@ class EditorSession:
             for item in self.clipboard
         )
         self._push_clip_edit(
-            track, "Paste audio", sorted(shifted, key=lambda item: item.timeline_start_frame)
+            track,
+            "Paste audio",
+            sorted(shifted, key=lambda item: item.timeline_start_frame),
+            after_selection=(target, target + width),
+            after_playhead=target,
         )
-        self.selection.set(target, target + width, max(self.total_frames, target + width))
 
     def move_clip(self, clip_id: UUID, delta_frames: int) -> None:
         track = self._require_active_track()
@@ -633,17 +730,68 @@ class EditorSession:
                 )
         return sorted(output, key=lambda item: item.timeline_start_frame)
 
-    def _push_clip_edit(self, track: EditorTrack, label: str, after: list[Clip]) -> None:
+    def _push_clip_edit(
+        self,
+        track: EditorTrack,
+        label: str,
+        after: list[Clip],
+        *,
+        after_selection: tuple[int, int] | None | bool = False,
+        after_playhead: int | None = None,
+    ) -> None:
         before = tuple(track.clips)
         result = tuple(after)
+        before_state = self._capture_navigation()
+        target_selection = before_state[1] if after_selection is False else after_selection
+        after_state = (
+            self.playhead_frame if after_playhead is None else int(after_playhead),
+            target_selection,
+            (self.viewport.start, self.viewport.end),
+        )
 
-        def apply(clips: tuple[Clip, ...]) -> None:
+        def apply(clips: tuple[Clip, ...], state: tuple[object, object, object]) -> None:
+            previous = self._capture_navigation()
             track.clips[:] = clips
+            track.content_version += 1
+            self._render_snapshots.pop(track.id, None)
             self.timeline_dirty = True
+            playhead, selection, viewport = state
+            self.playhead_frame = int(playhead)
+            if selection is None:
+                self.selection.clear()
+            else:
+                first, second = selection  # type: ignore[misc]
+                self.selection.set(first, second, max(self.total_frames, int(second)))
+            first, second = viewport  # type: ignore[misc]
+            self.viewport.set(first, second, self.total_frames)
             self._clamp_timeline()
-            self._emit(SessionEventType.TRACK_CONTENT, track.id)
+            current = self._capture_navigation()
+            changes = {SessionEventType.TRACK_CONTENT}
+            if previous[0] != current[0]:
+                changes.add(SessionEventType.PLAYHEAD)
+            if previous[1] != current[1]:
+                changes.add(SessionEventType.SELECTION)
+            if previous[2] != current[2]:
+                changes.add(SessionEventType.VIEWPORT)
+            self._emit_batch(changes, track.id)
 
-        self.commands.push(CallbackCommand(label, lambda: apply(result), lambda: apply(before)))
+        self.commands.push(
+            CallbackCommand(
+                label,
+                lambda: apply(result, after_state),
+                lambda: apply(before, before_state),
+            )
+        )
+
+    def _capture_navigation(
+        self,
+    ) -> tuple[int, tuple[int, int] | None, tuple[int, int]]:
+        selection = (
+            (self.selection.start, self.selection.end)
+            if self.selection.start is not None and self.selection.end is not None
+            else None
+        )
+        return self.playhead_frame, selection, (self.viewport.start, self.viewport.end)
 
     def _selection_bounds(self) -> tuple[int, int]:
         if not self.selection.active:

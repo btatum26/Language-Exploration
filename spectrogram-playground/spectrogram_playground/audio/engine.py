@@ -5,8 +5,8 @@ from typing import Protocol
 
 import numpy as np
 
-from src.model.project import Project
-from src.model.transport import TransportState
+from spectrogram_playground.model.project import Project
+from spectrogram_playground.model.transport import TransportState
 
 from .mixer import Mixer
 

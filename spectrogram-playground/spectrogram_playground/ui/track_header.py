@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtWidgets
 
-from src.model.track import Track
+from spectrogram_playground.model.track import Track
 
 
 class TrackHeader(QtWidgets.QFrame):
@@ -35,7 +35,7 @@ class TrackHeader(QtWidgets.QFrame):
         self.name_edit = QtWidgets.QLineEdit(track.name)
         self.name_edit.setAccessibleName("Track name")
         self.name_edit.editingFinished.connect(self._rename)
-        active_button = QtWidgets.QToolButton(text="●")
+        active_button = QtWidgets.QToolButton(text="â—")
         active_button.setToolTip("Make this the active track")
         active_button.setStyleSheet(f"color: {track.color}")
         active_button.clicked.connect(lambda: self.activated.emit(track.id))
@@ -49,9 +49,9 @@ class TrackHeader(QtWidgets.QFrame):
         self.visible = self._toggle(
             "V", "Visible", track.visible, lambda value: self._set("visible", value)
         )
-        up = QtWidgets.QToolButton(text="↑")
-        down = QtWidgets.QToolButton(text="↓")
-        remove = QtWidgets.QToolButton(text="×")
+        up = QtWidgets.QToolButton(text="â†‘")
+        down = QtWidgets.QToolButton(text="â†“")
+        remove = QtWidgets.QToolButton(text="Ã—")
         up.clicked.connect(lambda: self.move_requested.emit(track.id, -1))
         down.clicked.connect(lambda: self.move_requested.emit(track.id, 1))
         remove.clicked.connect(lambda: self.remove_requested.emit(track.id))

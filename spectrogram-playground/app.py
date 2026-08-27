@@ -1,4 +1,4 @@
-from src.application import main
+from spectrogram_playground.application import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import threading
+import time
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import numpy as np
+import pytest
 import soundfile as sf
 from PySide6 import QtCore, QtWidgets
 
@@ -12,8 +16,9 @@ from alignment_workbench.services.models import (
     RecordingSummary,
     SegmentData,
 )
+from alignment_workbench.services.tasks import TaskManager
 from alignment_workbench.ui.main_window import MainWindow
-from alignment_workbench.ui.recording_panel import RecordingPanel
+from alignment_workbench.ui.recording_panel import AudioFileOwnership, RecordingPanel
 
 
 class FakeServices:
@@ -163,6 +168,7 @@ def test_relabel_boundary_save_and_split_create_revision_requests(
     assert request.start_sample > 0
     assert request.operation == "update"
 
+    qtbot.waitUntil(lambda: "revision" not in window.tasks._tasks)
     window.session.set_playhead((phone.start_frame + phone.end_frame) // 2)
     window.inspector.split()
     qtbot.waitUntil(lambda: len(services.revisions) == 2)
@@ -187,3 +193,65 @@ def test_text_fields_keep_normal_editing_shortcuts(qtbot, monkeypatch) -> None:
     qtbot.keyClick(edit, QtCore.Qt.Key.Key_V, QtCore.Qt.KeyboardModifier.ControlModifier)
     assert edit.text() == "ciao"
     window.close()
+
+
+@pytest.mark.parametrize(
+    "ownership",
+    [AudioFileOwnership.USER_IMPORTED, AudioFileOwnership.USER_EXPORTED],
+)
+@pytest.mark.parametrize("action", ["cancel", "retake"])
+def test_cancel_and_retake_preserve_user_owned_audio(
+    qtbot, tmp_path, monkeypatch, ownership, action
+) -> None:
+    source = tmp_path / "user-owned.wav"
+    source.write_bytes(b"keep")
+    monkeypatch.setattr(RecordingPanel, "refresh_devices", lambda self: None)
+    monkeypatch.setattr(RecordingPanel, "start", lambda self: None)
+    panel = RecordingPanel(TaskManager())
+    qtbot.addWidget(panel)
+    panel.set_artifact(source, ownership)
+
+    getattr(panel, action)()
+    getattr(panel, action)()
+
+    assert source.read_bytes() == b"keep"
+
+
+def test_late_cancelled_take_result_removes_only_temporary_artifact(
+    qtbot, tmp_path, monkeypatch
+) -> None:
+    imported = tmp_path / "imported.wav"
+    imported.write_bytes(b"keep")
+    late_take = tmp_path / "late-take.wav"
+    late_take.write_bytes(b"temporary")
+    monkeypatch.setattr(RecordingPanel, "refresh_devices", lambda self: None)
+    panel = RecordingPanel(TaskManager())
+    qtbot.addWidget(panel)
+    panel.set_artifact(imported, AudioFileOwnership.USER_IMPORTED)
+    panel._take_write = uuid4()
+
+    panel._task_completed("take-write", uuid4(), (late_take, 1.0))
+
+    assert imported.read_bytes() == b"keep"
+    assert panel.take_path == imported
+    assert not late_take.exists()
+
+
+def test_window_shutdown_is_bounded_with_unresponsive_task(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(RecordingPanel, "refresh_devices", lambda self: None)
+    window = MainWindow(None)
+    qtbot.addWidget(window)
+    release = threading.Event()
+    window.tasks.submit(
+        "unresponsive",
+        lambda _cancel, _progress: release.wait(10),
+        mutation=True,
+    )
+
+    started = time.monotonic()
+    window.close()
+    elapsed = time.monotonic() - started
+    release.set()
+
+    assert elapsed < 3.0
+    assert window.timer.isActive() is False

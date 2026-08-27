@@ -123,7 +123,7 @@ accent-audio-explorer/
     README.md
     LICENSE
 
-    src/
+    spectrogram_playground/
         accent_audio_explorer/
             __init__.py
             application.py

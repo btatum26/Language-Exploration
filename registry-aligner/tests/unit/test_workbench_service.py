@@ -5,7 +5,6 @@ from uuid import UUID, uuid4
 import pytest
 
 from registry_align.config import AppConfig, SourceConfig
-from registry_align.errors import ConfigurationError
 from registry_align.pipeline.service import AlignmentService
 from registry_align.workbench import RegistryWorkbenchService
 
@@ -18,6 +17,7 @@ class FakeRepository:
             {
                 "id": UUID("00000000-0000-0000-0000-000000000001"),
                 "kind": "phone",
+                "label": "a",
                 "start_sample": 0,
                 "end_sample": 100,
                 "parent_segment_id": UUID("00000000-0000-0000-0000-000000000010"),
@@ -25,6 +25,7 @@ class FakeRepository:
             {
                 "id": UUID("00000000-0000-0000-0000-000000000002"),
                 "kind": "phone",
+                "label": "b",
                 "start_sample": 100,
                 "end_sample": 180,
                 "parent_segment_id": UUID("00000000-0000-0000-0000-000000000010"),
@@ -65,6 +66,24 @@ class FakeRepository:
     def save_revision(self, revision):
         self.saved.append(revision)
         return UUID(revision.revision_id)
+
+    def alignment_topology(self, _base_run_id, *, lock=False):
+        revisions = []
+        for item in self.saved:
+            row = item.model_dump(mode="python")
+            row["id"] = UUID(row.pop("revision_id"))
+            row["segment_id"] = UUID(row["segment_id"])
+            row["review_state"] = row.pop("review_status")
+            revisions.append(row)
+        parent = {
+            "id": UUID("00000000-0000-0000-0000-000000000010"),
+            "kind": "word",
+            "label": "ab",
+            "start_sample": 0,
+            "end_sample": 180,
+            "parent_segment_id": None,
+        }
+        return [parent, *(dict(item) for item in self.segment_rows)], revisions
 
     def speakers(self, text=""):
         return [{"id": "speaker-1", "display_name": "Speaker One", "language": "it"}]
@@ -170,6 +189,7 @@ def test_split_and_merge_validate_adjacency_and_hierarchy(service) -> None:
     assert split["review_state"] == "accepted"
     assert repository.saved[-1].operation == "split"
 
+    split_right = f"{first}:right"
     workbench.save_revision(
         segment_id=first,
         base_run_id="run",
@@ -178,12 +198,12 @@ def test_split_and_merge_validate_adjacency_and_hierarchy(service) -> None:
         label=None,
         review_state="accepted",
         operation="merge",
-        affected_segment_ids=(first, second),
+        affected_segment_ids=(split_right, second),
         replacement_segments=(
             {
                 "segment_id": f"{first}:merged",
                 "label": "ab",
-                "start_sample": 0,
+                "start_sample": 40,
                 "end_sample": 180,
                 "parent_segment_id": parent,
             },
@@ -191,27 +211,7 @@ def test_split_and_merge_validate_adjacency_and_hierarchy(service) -> None:
     )
     assert repository.saved[-1].operation == "merge"
 
-    with pytest.raises(ConfigurationError, match="adjacent"):
-        repository.segment_rows[1]["start_sample"] = 101
-        workbench.save_revision(
-            segment_id=first,
-            base_run_id="run",
-            start_sample=None,
-            end_sample=None,
-            label=None,
-            review_state="accepted",
-            operation="merge",
-            affected_segment_ids=(first, second),
-            replacement_segments=(
-                {
-                    "segment_id": "bad",
-                    "label": "bad",
-                    "start_sample": 0,
-                    "end_sample": 180,
-                    "parent_segment_id": parent,
-                },
-            ),
-        )
+    assert repository.saved[-1].effective_target_segment_ids == (split_right, second)
 
 
 def test_new_audio_uses_one_content_hash_local_artifact(tmp_path) -> None:

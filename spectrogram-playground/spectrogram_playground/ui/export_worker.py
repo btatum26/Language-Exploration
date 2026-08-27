@@ -4,9 +4,9 @@ from pathlib import Path
 
 from PySide6 import QtCore
 
-from src.analysis.cache import AnalysisCache
-from src.exporting import export_acoustic_csv
-from src.model.project import Project
+from spectrogram_playground.analysis.cache import AnalysisCache
+from spectrogram_playground.exporting import export_acoustic_csv
+from spectrogram_playground.model.project import Project
 
 
 class ExportSignals(QtCore.QObject):

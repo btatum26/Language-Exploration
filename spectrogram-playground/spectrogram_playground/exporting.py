@@ -5,10 +5,10 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from src.analysis.cache import AnalysisCache
-from src.analysis.formants import estimate_formants
-from src.analysis.pitch import estimate_acoustic_tracks
-from src.model.project import Project
+from spectrogram_playground.analysis.cache import AnalysisCache
+from spectrogram_playground.analysis.formants import estimate_formants
+from spectrogram_playground.analysis.pitch import estimate_acoustic_tracks
+from spectrogram_playground.model.project import Project
 
 
 def export_project_json(project: Project, path: str | Path) -> None:

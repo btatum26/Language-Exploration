@@ -7,9 +7,9 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 
-from src.analysis.cache import AnalysisCache
-from src.analysis.spectrum import SpectrumResult, calculate_spectrum
-from src.model.project import Project
+from spectrogram_playground.analysis.cache import AnalysisCache
+from spectrogram_playground.analysis.spectrum import SpectrumResult, calculate_spectrum
+from spectrogram_playground.model.project import Project
 
 
 @dataclass(frozen=True, slots=True)

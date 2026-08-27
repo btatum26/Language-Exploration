@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from src.model.track import Track
+from spectrogram_playground.model.track import Track
 
 from .resampling import resample_audio
 

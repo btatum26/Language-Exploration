@@ -6,7 +6,7 @@ import numpy as np
 import pyqtgraph as pg
 import pytest
 from PySide6 import QtCore, QtGui, QtTest, QtWidgets
-from src.model.transport import TransportState
+from spectrogram_playground.model.transport import TransportState
 
 from alignment_workbench.analysis.tasks import AnalysisCoordinator
 from alignment_workbench.state.editor import EditorSession, SessionEventType
@@ -308,4 +308,39 @@ def test_waveform_and_spectrogram_enable_safe_downsampling(qtbot) -> None:
         assert curve.opts["autoDownsample"]
         assert curve.opts["downsampleMethod"] == "peak"
     assert sum(isinstance(item, pg.FillBetweenItem) for item in widget.waveform.plotItem.items) == 1
+    timeline.close()
+
+
+def test_offscreen_tracks_skip_plot_ranges_and_sync_when_revealed(qtbot, monkeypatch) -> None:
+    monkeypatch.setattr(AnalysisCoordinator, "analyze", lambda *_args, **_kwargs: None)
+    session = EditorSession(sample_rate=1_000)
+    for index in range(12):
+        session.add_audio_track(
+            np.zeros(10_000, dtype=np.float32),
+            name=f"track-{index}",
+            identity=f"track-{index}",
+        )
+    timeline = TimelineEditor(session)
+    qtbot.addWidget(timeline)
+    timeline.resize(900, 320)
+    timeline.show()
+    qtbot.waitUntil(lambda: bool(timeline._visible_track_ids))
+    session.set_viewport(0, 4_000)
+    visible_before = set(timeline._visible_track_ids)
+    calls = {track_id: Mock() for track_id in timeline.track_widgets}
+    for track_id, callback in calls.items():
+        monkeypatch.setattr(timeline.track_widgets[track_id], "update_viewport", callback)
+
+    session.pan_viewport(100)
+
+    assert all(calls[track_id].call_count == 1 for track_id in visible_before)
+    assert all(
+        calls[track_id].call_count == 0 for track_id in calls if track_id not in visible_before
+    )
+
+    timeline.scroller.verticalScrollBar().setValue(timeline.scroller.verticalScrollBar().maximum())
+    qtbot.waitUntil(lambda: timeline._visible_track_ids != visible_before)
+    newly_visible = timeline._visible_track_ids - visible_before
+    assert newly_visible
+    assert all(calls[track_id].call_count >= 1 for track_id in newly_visible)
     timeline.close()

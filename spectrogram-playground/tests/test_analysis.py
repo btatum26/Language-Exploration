@@ -3,11 +3,11 @@ from __future__ import annotations
 import numpy as np
 from scipy import signal
 
-from src.analysis.formants import estimate_formants
-from src.analysis.pitch import estimate_acoustic_tracks
-from src.analysis.spectrogram import calculate_spectrogram
-from src.analysis.spectrum import calculate_spectrum
-from src.fixtures import silence, sine, two_tone
+from spectrogram_playground.analysis.formants import estimate_formants
+from spectrogram_playground.analysis.pitch import estimate_acoustic_tracks
+from spectrogram_playground.analysis.spectrogram import calculate_spectrogram
+from spectrogram_playground.analysis.spectrum import calculate_spectrum
+from spectrogram_playground.fixtures import silence, sine, two_tone
 
 RATE = 16_000
 

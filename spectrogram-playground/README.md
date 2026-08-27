@@ -12,7 +12,7 @@ Spectrogram Playground is a native, local desktop workspace for comparing voice 
 
 ## Architecture
 
-`src/model` owns project, track, transport, selection, viewport, and settings state. `src/audio` decodes and resamples immutable source audio, mixes prepared 48 kHz buffers in one callback-driven output stream, and records microphone input. `src/analysis` computes and caches waveform envelopes, STFT/Mel data, F0/RMS, and spectra. Bounded worker pools run every expensive analysis operation; only completed results cross Qt signals back to the UI thread. `src/ui` renders those results with Qt Widgets and PyQtGraph. A Qt timer only redraws the authoritative audio-frame position.
+`spectrogram_playground/model` owns project, track, transport, selection, viewport, and settings state. `spectrogram_playground/audio` decodes and resamples immutable source audio, mixes prepared 48 kHz buffers in one callback-driven output stream, and records microphone input. `spectrogram_playground/analysis` computes and caches waveform envelopes, STFT/Mel data, F0/RMS, and spectra. Bounded worker pools run every expensive analysis operation; only completed results cross Qt signals back to the UI thread. `spectrogram_playground/ui` renders those results with Qt Widgets and PyQtGraph. A Qt timer only redraws the authoritative audio-frame position.
 
 Playback buffers default to 48 kHz for device output. Separate analysis buffers default to 16 kHz for speech-oriented transforms. Import never overwrites the decoded source samples.
 

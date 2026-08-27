@@ -204,7 +204,11 @@ segment_revisions = Table(
     Column("reason", Text),
     Column("operation", String(32), nullable=False, server_default=text("'update'")),
     Column("affected_segment_ids", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column(
+        "effective_target_segment_ids", JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    ),
     Column("replacement_segments", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
+    Column("base_topology_version", BigInteger),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
     CheckConstraint("review_state IN ('proposed','accepted','rejected')", name="ck_revision_state"),
     CheckConstraint("operation IN ('update','split','merge')", name="ck_revision_operation"),

@@ -19,6 +19,8 @@ class TimelineEditor(QtWidgets.QWidget):
         self.analysis = AnalysisCoordinator(self)
         self.track_widgets: dict[UUID, TrackWidget] = {}
         self.track_heights: dict[UUID, int] = {}
+        self._visible_track_ids: set[UUID] = set()
+        self._closed = False
         self._pending_pan_frames = 0.0
         self._scroll_total_frames = -1
         self._scroll_viewport_width = -1
@@ -40,6 +42,7 @@ class TimelineEditor(QtWidgets.QWidget):
         self.track_layout.setSizeConstraint(QtWidgets.QLayout.SizeConstraint.SetMinAndMaxSize)
         self.track_layout.addStretch(1)
         self.scroller.setWidget(self.content)
+        self.scroller.verticalScrollBar().valueChanged.connect(self._sync_visible_tracks)
         root.addWidget(self.scroller, 1)
         self.horizontal_scroll = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Horizontal)
         self.horizontal_scroll.setAccessibleName("Timeline horizontal position")
@@ -65,6 +68,7 @@ class TimelineEditor(QtWidgets.QWidget):
             self.track_layout.insertWidget(self.track_layout.count() - 1, widget)
             self.track_widgets[track.id] = widget
         self._sync_horizontal_scroll_metrics()
+        QtCore.QTimer.singleShot(0, self._sync_visible_tracks)
 
     def _create_track_widget(self, track_id: UUID) -> TrackWidget:
         track = self.session.track(track_id)
@@ -88,6 +92,9 @@ class TimelineEditor(QtWidgets.QWidget):
         return widget
 
     def _state_changed(self, event: SessionEvent) -> None:
+        if event.reason is SessionEventType.BATCH:
+            self._batch_changed(event)
+            return
         if event.reason is SessionEventType.TRACK_ADDED and event.track_id is not None:
             widget = self._create_track_widget(event.track_id)
             index = next(
@@ -127,10 +134,11 @@ class TimelineEditor(QtWidgets.QWidget):
             for widget in widgets:
                 widget.sync_layout()
         elif event.reason is SessionEventType.TRACK_CONTENT and event.track_id is not None:
-            target_widget = self.track_widgets.get(event.track_id)
-            if target_widget is not None:
-                target_widget.refresh_analysis()
             self.update_viewport(force_scroll_metrics=True)
+        elif event.reason is SessionEventType.RENDER_READY and event.track_id is not None:
+            target_widget = self.track_widgets.get(event.track_id)
+            if target_widget is not None and event.track_id in self._visible_track_ids:
+                target_widget.refresh_analysis()
         elif event.reason is SessionEventType.VIEWPORT:
             self.update_viewport()
         elif event.reason is SessionEventType.PLAYHEAD:
@@ -147,8 +155,28 @@ class TimelineEditor(QtWidgets.QWidget):
                 target_widget.update_selection()
                 target_widget.update_segments()
 
+    def _batch_changed(self, event: SessionEvent) -> None:
+        changes = event.changes
+        if SessionEventType.TRACK_REMOVED in changes and event.track_id is not None:
+            widget = self.track_widgets.pop(event.track_id, None)
+            self.track_heights.pop(event.track_id, None)
+            if widget is not None:
+                self.track_layout.removeWidget(widget)
+                widget.deleteLater()
+        if SessionEventType.VIEWPORT in changes or SessionEventType.TRACK_CONTENT in changes:
+            self.update_viewport(force_scroll_metrics=SessionEventType.TRACK_CONTENT in changes)
+        if SessionEventType.PLAYHEAD in changes:
+            self.update_playhead()
+        if SessionEventType.SELECTION in changes:
+            self.update_selection()
+        if SessionEventType.SEGMENT_SELECTION in changes:
+            self.update_segments()
+        if SessionEventType.TRACK_LAYOUT in changes:
+            for widget in self.track_widgets.values():
+                widget.sync_layout()
+
     def update_viewport(self, *, force_scroll_metrics: bool = False) -> None:
-        for widget in self.track_widgets.values():
+        for widget in self._visible_widgets():
             widget.update_viewport()
         metrics_changed = (
             self.session.total_frames != self._scroll_total_frames
@@ -160,16 +188,50 @@ class TimelineEditor(QtWidgets.QWidget):
             self._sync_horizontal_scroll_value()
 
     def update_playhead(self) -> None:
-        for widget in self.track_widgets.values():
+        for widget in self._visible_widgets():
             widget.update_playhead()
 
     def update_selection(self) -> None:
-        for widget in self.track_widgets.values():
+        for widget in self._visible_widgets():
             widget.update_selection()
 
     def update_segments(self) -> None:
-        for widget in self.track_widgets.values():
+        for widget in self._visible_widgets():
             widget.update_segments()
+
+    def _visible_widgets(self) -> tuple[TrackWidget, ...]:
+        if not self.isVisible():
+            return tuple(self.track_widgets.values())
+        return tuple(
+            widget
+            for track_id, widget in self.track_widgets.items()
+            if track_id in self._visible_track_ids
+        )
+
+    @QtCore.Slot()
+    def _sync_visible_tracks(self) -> set[UUID]:
+        viewport = self.scroller.viewport()
+        viewport_rect = viewport.rect()
+        visible: set[UUID] = set()
+        for track_id, widget in self.track_widgets.items():
+            top_left = widget.mapTo(viewport, QtCore.QPoint(0, 0))
+            rectangle = QtCore.QRect(top_left, widget.size())
+            if widget.track.visible and rectangle.intersects(viewport_rect):
+                visible.add(track_id)
+        newly_visible = visible - self._visible_track_ids
+        self._visible_track_ids = visible
+        for track_id in newly_visible:
+            widget = self.track_widgets[track_id]
+            if (
+                widget.generation != widget.track.content_version
+                and self.session.prepared_render_snapshot(track_id) is not None
+            ):
+                widget.refresh_analysis()
+            widget.update_viewport()
+            widget.update_playhead()
+            widget.update_selection()
+            widget.update_segments()
+        return newly_visible
 
     def _remember_track_height(self, track_id: UUID, height: int) -> None:
         self.track_heights[track_id] = int(height)
@@ -233,7 +295,14 @@ class TimelineEditor(QtWidgets.QWidget):
         bar = self.scroller.verticalScrollBar()
         bar.setValue(bar.value() - int(pixels))
 
-    def close(self) -> None:
+    def close(self, wait_ms: int = 0) -> bool:
+        if self._closed:
+            return True
+        self._closed = True
         self._finish_pan()
         self._unsubscribe()
-        self.analysis.wait(30_000)
+        self.analysis.cancel_all()
+        complete = self.analysis.wait(wait_ms)
+        if not complete:
+            self.analysis.detach_running()
+        return complete

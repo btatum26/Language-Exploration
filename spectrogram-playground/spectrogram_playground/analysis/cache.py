@@ -36,6 +36,15 @@ class AnalysisCache:
             for key in [key for key in self._values if key[0] == track_id]:
                 del self._values[key]
 
+    def discard(self, key: tuple[object, ...]) -> None:
+        with self._lock:
+            self._values.pop(key, None)
+
+    def discard_prefix(self, *prefix: object) -> None:
+        with self._lock:
+            for key in [key for key in self._values if key[: len(prefix)] == prefix]:
+                del self._values[key]
+
     def clear(self) -> None:
         with self._lock:
             self._values.clear()

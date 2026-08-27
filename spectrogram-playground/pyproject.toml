@@ -27,10 +27,10 @@ dev = [
 ]
 
 [project.scripts]
-spectrogram-playground = "src.application:main"
+spectrogram-playground = "spectrogram_playground.application:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["spectrogram_playground"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

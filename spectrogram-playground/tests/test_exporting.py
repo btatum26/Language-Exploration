@@ -5,10 +5,10 @@ import json
 
 import numpy as np
 
-from src.analysis.cache import AnalysisCache
-from src.audio.decoding import track_from_samples
-from src.exporting import export_acoustic_csv, export_project_json
-from src.model import Project
+from spectrogram_playground.analysis.cache import AnalysisCache
+from spectrogram_playground.audio.decoding import track_from_samples
+from spectrogram_playground.exporting import export_acoustic_csv, export_project_json
+from spectrogram_playground.model import Project
 
 
 def test_json_export_contains_metadata_but_not_audio(tmp_path) -> None:

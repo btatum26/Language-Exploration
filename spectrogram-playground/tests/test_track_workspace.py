@@ -3,11 +3,11 @@ from __future__ import annotations
 import numpy as np
 from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 
-from src.analysis.cache import AnalysisCache
-from src.audio.decoding import track_from_samples
-from src.model import Project
-from src.ui.track_workspace import DEFAULT_TRACK_HEIGHT, MIN_TRACK_HEIGHT
-from src.ui.waveform_view import WaveformWorkspace
+from spectrogram_playground.analysis.cache import AnalysisCache
+from spectrogram_playground.audio.decoding import track_from_samples
+from spectrogram_playground.model import Project
+from spectrogram_playground.ui.track_workspace import DEFAULT_TRACK_HEIGHT, MIN_TRACK_HEIGHT
+from spectrogram_playground.ui.waveform_view import WaveformWorkspace
 
 
 def make_track(name: str):
@@ -100,9 +100,7 @@ def test_wheel_scrolls_tracks_and_shift_wheel_pans_timeline(qtbot) -> None:
 
     vertical_position = workspace.verticalScrollBar().value()
     project.viewport.set(0.02, 0.12, project.duration)
-    workspace.pan_requested.connect(
-        lambda delta: project.viewport.pan(delta, project.duration)
-    )
+    workspace.pan_requested.connect(lambda delta: project.viewport.pan(delta, project.duration))
     timeline_start = project.viewport.start
     send_wheel(plot, -120, QtCore.Qt.KeyboardModifier.ShiftModifier)
 

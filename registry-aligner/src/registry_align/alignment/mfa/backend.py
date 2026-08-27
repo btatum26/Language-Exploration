@@ -75,10 +75,10 @@ class MfaBackend:
                         severity=Severity.ERROR,
                         stage="doctor",
                         message=f"MFA executable is unavailable: {executable}",
-                        hint="Install Montreal Forced Aligner, then set alignment.mfa.executable.",
+                        hint="Install MFA or set alignment.mfa.executable/REGISTRY_ALIGN_MFA.",
                     ),
                 ),
-                remediation_commands=("conda install -c conda-forge montreal-forced-aligner",),
+                remediation_commands=("pixi install",),
             )
             return self._diagnostics
         version_result = self._run([executable, "version"], timeout=30)
