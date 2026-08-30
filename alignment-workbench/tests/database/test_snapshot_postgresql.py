@@ -96,7 +96,11 @@ def _insert_graph(connection: Connection) -> dict[str, UUID]:
             "(id, storage_uri, sha256, sample_rate_hz, frame_count, channels) "
             "VALUES (:id, :uri, :sha, 16000, 16000, 1)"
         ),
-        {"id": ids["asset"], "uri": f"audio/{ids['asset']}.wav", "sha": "a" * 64},
+        {
+            "id": ids["asset"],
+            "uri": f"registry-audio://assets/{ids['asset']}",
+            "sha": "a" * 64,
+        },
     )
     connection.execute(
         text(
@@ -186,7 +190,7 @@ def test_migration_catalog_shape(database_engine: Engine) -> None:
     with database_engine.connect() as connection:
         assert (
             connection.scalar(text(f"SELECT version_num FROM public.{version_table}"))
-            == "20260830_0001_snapshot"
+            == "20260830_0002_storage_uri"
         )
 
 
@@ -203,7 +207,7 @@ def test_minimal_graph_and_uniqueness_constraints(connection: Connection) -> Non
         connection,
         f"INSERT INTO {SCHEMA}.audio_assets "
         "(storage_uri, sha256, sample_rate_hz, frame_count, channels) "
-        "VALUES ('other.wav', :sha, 1, 1, 1)",
+        "VALUES ('registry-audio://assets/duplicate-bytes', :sha, 1, 1, 1)",
         {"sha": "a" * 64},
     )
     _assert_rejected(
@@ -345,6 +349,115 @@ def test_annotation_pin_entry_geometry_and_json_constraints(connection: Connecti
         connection,
         f"INSERT INTO {SCHEMA}.audio_assets "
         "(storage_uri, sha256, sample_rate_hz, frame_count, channels, source_metadata) "
-        "VALUES ('array.json', :sha, 1, 1, 1, '[]'::jsonb)",
+        "VALUES ('registry-audio://assets/invalid-json', :sha, 1, 1, 1, '[]'::jsonb)",
         {"sha": "d" * 64},
+    )
+
+
+def test_storage_uri_must_not_be_empty(connection: Connection) -> None:
+    _assert_rejected(
+        connection,
+        f"INSERT INTO {SCHEMA}.audio_assets "
+        "(storage_uri, sha256, sample_rate_hz, frame_count, channels) "
+        "VALUES ('', :sha, 1, 1, 1)",
+        {"sha": "e" * 64},
+    )
+
+
+@pytest.mark.parametrize(
+    "geometry_array",
+    (
+        "ARRAY[]::text[]",
+        "ARRAY['unknown']::text[]",
+        "ARRAY['point', NULL]::text[]",
+    ),
+    ids=("empty", "unknown", "null-item"),
+)
+def test_allowed_geometry_types_reject_invalid_arrays(
+    connection: Connection, geometry_array: str
+) -> None:
+    ids = _insert_graph(connection)
+    _assert_rejected(
+        connection,
+        f"INSERT INTO {SCHEMA}.library_entries "
+        "(library_version_id, position, entry_key, display_name, description, "
+        "allowed_geometry_types) "
+        f"VALUES (:version, 1, 'invalid', 'Invalid', '', {geometry_array})",
+        ids,
+    )
+
+
+def test_default_speaker_ref_must_reference_a_speaker(connection: Connection) -> None:
+    ids = _insert_graph(connection)
+    _assert_rejected(
+        connection,
+        f"INSERT INTO {SCHEMA}.recording_revisions "
+        "(recording_id, revision_number, parent_revision_id, name, "
+        "default_speaker_ref, language) "
+        "VALUES (:recording, 2, :revision, 'Invalid speaker', :speaker, 'it')",
+        {**ids, "speaker": uuid4()},
+    )
+
+
+def test_library_version_label_and_content_hash_are_unique_per_library(
+    connection: Connection,
+) -> None:
+    ids = _insert_graph(connection)
+    _assert_rejected(
+        connection,
+        f"INSERT INTO {SCHEMA}.library_versions "
+        "(library_id, version_label, content_sha256) "
+        "VALUES (:library, '1.0.0', :sha)",
+        {**ids, "sha": "c" * 64},
+    )
+    _assert_rejected(
+        connection,
+        f"INSERT INTO {SCHEMA}.library_versions "
+        "(library_id, version_label, content_sha256) "
+        "VALUES (:library, '2.0.0', :sha)",
+        {**ids, "sha": "b" * 64},
+    )
+
+
+def test_pinned_library_position_is_unique_per_revision(connection: Connection) -> None:
+    ids = _insert_graph(connection)
+    second_version = uuid4()
+    connection.execute(
+        text(
+            f"INSERT INTO {SCHEMA}.library_versions "
+            "(id, library_id, version_label, content_sha256) "
+            "VALUES (:id, :library, '2.0.0', :sha)"
+        ),
+        {"id": second_version, "library": ids["library"], "sha": "c" * 64},
+    )
+    _assert_rejected(
+        connection,
+        f"INSERT INTO {SCHEMA}.recording_revision_libraries "
+        "(recording_revision_id, library_version_id, position) "
+        "VALUES (:revision, :version, 0)",
+        {**ids, "version": second_version},
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid_frequency",
+    ("'NaN'", "'Infinity'", "'-Infinity'"),
+    ids=("nan", "positive-infinity", "negative-infinity"),
+)
+@pytest.mark.parametrize("column", ("min_frequency_hz", "max_frequency_hz"))
+def test_frequency_values_must_be_finite(
+    connection: Connection, column: str, invalid_frequency: str
+) -> None:
+    ids = _insert_graph(connection)
+    minimum = f"{invalid_frequency}::double precision" if column == "min_frequency_hz" else "10"
+    maximum = f"{invalid_frequency}::double precision" if column == "max_frequency_hz" else "20"
+    _assert_rejected(
+        connection,
+        f"INSERT INTO {SCHEMA}.annotations "
+        "(recording_revision_id, annotation_id, position, library_version_id, "
+        "library_entry_id, geometry_type, start_sample, end_sample, "
+        "min_frequency_hz, max_frequency_hz) "
+        f"VALUES (:revision, gen_random_uuid(), 1, :version, :entry, "
+        f"'time_frequency_box', 0, 1, {minimum}, {maximum})",
+        ids,
     )

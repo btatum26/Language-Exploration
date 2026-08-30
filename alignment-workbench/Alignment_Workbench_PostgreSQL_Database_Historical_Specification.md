@@ -1,10 +1,16 @@
-# Codex Prompt: Build the Registry Aligner PostgreSQL Foundation
+# Alignment Workbench PostgreSQL Database Historical Specification
 
-Copy the prompt below into Codex while it is opened at the root of the Language Exploration repository.
+**Status:** Implemented historical specification  
+**Owner:** `alignment-workbench`
+
+This file records the specification used to build the initial database foundation. It is not an
+active implementation prompt. All database migrations, SQLAlchemy mappings, database tests, and
+runtime-role policy described here belong to `alignment-workbench`, not `registry-aligner`.
 
 ---
 
-You are implementing the PostgreSQL database foundation for the clean rebuild of the `registry-aligner` subproject in the Language Exploration repository.
+The PostgreSQL database foundation belongs to the `alignment-workbench` subproject in the Language
+Exploration repository.
 
 This task is deliberately limited to the database foundation. Do **not** implement the application engine, repository use cases, GUI, audio-transfer code, or local recovery runtime yet.
 
@@ -136,7 +142,7 @@ Create the following tables in schema `registry_align`.
 ### `audio_assets`
 
 - `id UUID PRIMARY KEY DEFAULT gen_random_uuid()`
-- `storage_uri TEXT NOT NULL UNIQUE`
+- `storage_uri TEXT NOT NULL UNIQUE CHECK (length(storage_uri) > 0)`
 - `sha256 TEXT NOT NULL UNIQUE`
 - `logical_path TEXT NULL`
 - `media_type TEXT NULL`
@@ -154,6 +160,11 @@ Checks:
 - `source_metadata` is a JSON object.
 
 The current Pydantic field may still be named `storage_key`; do not rewrite the domain model merely to match the database column. The future mapper can map it to `storage_uri`.
+
+The authoritative value is a logical URI of the form
+`registry-audio://assets/<audio-asset-uuid>`. Relative server-storage keys are not part of the
+application contract. PostgreSQL enforces nonemptiness; the future service layer will validate the
+exact URI scheme and UUID form.
 
 ### `speakers`
 
@@ -246,7 +257,7 @@ The `audio_asset_id` and `created_at` columns are immutable. `head_revision_id` 
 - `parent_revision_id UUID NULL`
 - `schema_version TEXT NOT NULL DEFAULT '1.0'`
 - `name TEXT NOT NULL`
-- `default_speaker_ref TEXT NULL`
+- `default_speaker_ref UUID NULL`
 - `language TEXT NOT NULL`
 - `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
 - `author TEXT NULL`
@@ -255,6 +266,7 @@ The `audio_asset_id` and `created_at` columns are immutable. `head_revision_id` 
 Constraints and indexes:
 
 - FK `recording_id -> recordings.id`, `ON DELETE RESTRICT`.
+- FK `default_speaker_ref -> speakers.id`, `ON DELETE RESTRICT`.
 - Unique `(recording_id, revision_number)`.
 - Unique `(recording_id, id)` for composite references.
 - Composite FK `(recording_id, parent_revision_id) -> recording_revisions(recording_id, id)`.
@@ -264,7 +276,8 @@ Constraints and indexes:
 - Nonempty checks for `name` and `language` matching the current Pydantic behavior.
 - Index `(recording_id, created_at DESC)`.
 
-The current Pydantic model uses `default_speaker_ref: str | None`; preserve that as text. Do not silently change it to a UUID FK in this task.
+The domain model uses `default_speaker_ref: UUID | None`; persist it as a UUID foreign key to
+`speakers.id`.
 
 Handle the `recordings`/`recording_revisions` foreign-key cycle explicitly in SQLAlchemy metadata and Alembic, for example with a named `use_alter` constraint where appropriate. Do not weaken the same-recording head guarantee.
 

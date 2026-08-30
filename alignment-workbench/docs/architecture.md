@@ -48,7 +48,8 @@ existing native app rather than copied.
 
 ## Registry and PostgreSQL
 
-`RegistryWorkbenchService` is a public, Qt-free application boundary inside `registry-aligner`.
+`RegistryWorkbenchService` is a public, Qt-free application boundary inside
+`alignment-workbench`.
 The GUI never imports `storage.tables`, a SQLAlchemy engine, or MFA parsers. Catalog, detail,
 speaker, version, revision, ingestion, and alignment calls pass through repository protocols and
 unit-of-work transactions.

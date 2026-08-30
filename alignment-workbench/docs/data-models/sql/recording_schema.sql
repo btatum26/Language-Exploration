@@ -1,5 +1,5 @@
 -- Representative recording and signal-annotation DDL.
--- Apply through an Alembic migration in registry-aligner for production use.
+-- Apply through an Alembic migration owned by alignment-workbench for production use.
 -- Requires annotation_library_schema.sql.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -7,7 +7,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE audio_assets (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     sha256 varchar(64) NOT NULL UNIQUE,
-    storage_key text NOT NULL UNIQUE,
+    storage_uri text NOT NULL UNIQUE CHECK (length(storage_uri) > 0),
     logical_path text,
     media_type text,
     original_extension text,

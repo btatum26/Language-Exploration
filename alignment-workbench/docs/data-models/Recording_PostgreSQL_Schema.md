@@ -10,7 +10,7 @@ Scope: Audio assets, stable recordings, full revision snapshots, and annotations
 - `pgcrypto` for `gen_random_uuid()`
 - JSONB
 - Standard foreign keys, checks, and indexes
-- Alembic migrations through `registry-aligner`
+- Alembic migrations owned by `alignment-workbench`
 
 The annotation-library tables must exist before recording and annotation tables are created. The complete representative DDL is in [recording_schema.sql](sql/recording_schema.sql). It fixes the intended column shapes and constraints but is not a substitute for an Alembic migration.
 
@@ -22,7 +22,7 @@ The annotation-library tables must exist before recording and annotation tables 
 | --- | --- | --- |
 | `id` | UUID | Primary key |
 | `sha256` | VARCHAR(64) | Unique, required lowercase hexadecimal SHA-256 |
-| `storage_key` | TEXT | Unique, required |
+| `storage_uri` | TEXT | Unique, nonempty, and required; canonical form `registry-audio://assets/<uuid>` |
 | `logical_path` | TEXT | Optional display or import path |
 | `media_type` | TEXT | Optional |
 | `original_extension` | TEXT | Optional |

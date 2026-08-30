@@ -47,6 +47,13 @@ def test_metadata_has_named_constraints_and_indexes() -> None:
 
 
 def test_expected_uniques_and_indexes_are_declared() -> None:
+    audio_assets = Base.metadata.tables["registry_align.audio_assets"]
+    assert any(
+        isinstance(constraint, CheckConstraint)
+        and constraint.name == "ck_audio_assets_storage_uri_nonempty"
+        for constraint in audio_assets.constraints
+    )
+
     entries = Base.metadata.tables["registry_align.library_entries"]
     entry_uniques = {
         tuple(column.name for column in constraint.columns)

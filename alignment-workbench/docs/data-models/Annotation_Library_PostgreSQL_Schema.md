@@ -10,7 +10,7 @@ Scope: Persistent library identity, immutable versions, and immutable entries
 - `pgcrypto` for `gen_random_uuid()`
 - JSONB
 - Standard foreign keys, checks, and unique constraints
-- Alembic migrations through `registry-aligner`
+- Alembic migrations owned by `alignment-workbench`
 
 PostgreSQL enum types are not required. Checked text columns are easier to evolve through migrations.
 

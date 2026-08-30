@@ -1,5 +1,5 @@
 -- Representative annotation-library DDL.
--- Apply through an Alembic migration in registry-aligner for production use.
+-- Apply through an Alembic migration owned by alignment-workbench for production use.
 -- Apply this schema before recording_schema.sql.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;

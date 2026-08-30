@@ -23,7 +23,7 @@ package = false
 
 [tool.pytest.ini_options]
 addopts = "-ra -p no:cacheprovider"
-pythonpath = ["src"]
+pythonpath = [".", "src"]
 testpaths = ["tests"]
 markers = ["postgresql: requires an explicit disposable PostgreSQL target"]
 

@@ -1,4 +1,4 @@
-# Registry Aligner Persistence Engine Architecture
+# Alignment Workbench Persistence Architecture
 
 **Status:** Approved design baseline  
 **Date:** 2026-08-30  
@@ -6,7 +6,9 @@
 
 ## 1. Purpose
 
-This document defines the persistence architecture that the future `registry-aligner` engine and `alignment-workbench` GUI will use. It preserves the decisions needed to build the PostgreSQL database now without prematurely implementing the application engine.
+This document defines the persistence architecture owned by `alignment-workbench`. It preserves
+the decisions used to build the PostgreSQL database without prematurely implementing repository,
+application-service, audio-transfer, or GUI integration work.
 
 The database foundation must support:
 
@@ -110,7 +112,7 @@ erDiagram
 | Column               | Type        | Rules                                                |
 | -------------------- | ----------- | ---------------------------------------------------- |
 | `id`                 | UUID        | Primary key; `gen_random_uuid()` fallback            |
-| `storage_uri`        | TEXT        | Required and unique                                  |
+| `storage_uri`        | TEXT        | Required, nonempty, and unique                        |
 | `sha256`             | TEXT        | Required, unique, lowercase 64-character hexadecimal |
 | `logical_path`       | TEXT        | Optional provenance only; not authoritative identity |
 | `media_type`         | TEXT        | Optional                                             |
@@ -122,7 +124,11 @@ erDiagram
 | `source_metadata`    | JSONB       | Required JSON object; default `{}`                   |
 | `created_at`         | TIMESTAMPTZ | Required; server default `now()`                     |
 
-`sha256` deduplicates identical bytes. `storage_uri` identifies the one canonical server file for the asset. The file must exist before an authoritative recording is committed.
+`sha256` deduplicates identical bytes. `storage_uri` identifies the one canonical server file for
+the asset and uses `registry-audio://assets/<audio-asset-uuid>`. Relative server-storage keys do
+not cross the application boundary. PostgreSQL enforces that the value is nonempty; the future
+service validates the exact scheme and UUID form. The file must exist before an authoritative
+recording is committed.
 
 The current domain field named `storage_key` may map to `storage_uri` until it is deliberately renamed. The database should use the clearer `storage_uri` name.
 

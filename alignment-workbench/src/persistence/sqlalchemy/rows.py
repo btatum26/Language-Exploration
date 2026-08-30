@@ -39,6 +39,7 @@ GEOMETRY_TYPES = (
 class AudioAssetRow(Base):
     __tablename__ = "audio_assets"
     __table_args__ = (
+        CheckConstraint("length(storage_uri) > 0", name="storage_uri_nonempty"),
         CheckConstraint(
             "sha256 ~ '^[0-9a-f]{64}$'",
             name="sha256_lower_hex",
