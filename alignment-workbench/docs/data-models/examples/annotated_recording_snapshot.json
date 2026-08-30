@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "recording_id": "4de8f232-c443-49df-b411-143add24952f",
+  "revision": {
+    "id": "7df108e8-da4a-45a9-a193-8d331cf832f1",
+    "number": 4,
+    "parent_id": "03157330-bb8d-4bc7-9a96-6cbba8230f6c",
+    "created_at": "2026-08-30T23:00:00Z",
+    "author": "Ben",
+    "message": "Adjusted pitch event and added transient"
+  },
+  "name": "Italian comparison 001",
+  "default_speaker_ref": "speaker:luca",
+  "language": "it",
+  "audio_asset": {
+    "id": "f24a602b-5c44-414a-8799-480ada11334d",
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "storage_key": "audio/01/0123456789abcdef...",
+    "sample_rate_hz": 48000,
+    "frame_count": 192000,
+    "channels": 1
+  },
+  "libraries": [
+    {
+      "namespace": "le.core",
+      "version": "1.0.0",
+      "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "namespace": "le.prosody",
+      "version": "1.0.0",
+      "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "ed8e49d4-fab7-43df-a856-62b9d1bb27a5",
+      "concept_ref": "le.prosody@1.0.0:pitch-fall",
+      "geometry": {
+        "type": "time_interval",
+        "start_sample": 42100,
+        "end_sample": 49800
+      },
+      "attributes": {
+        "start_hz": 171.2,
+        "end_hz": 124.7,
+        "delta_semitones": -5.48
+      },
+      "confidence": 0.91,
+      "provenance_ref": "pitch-detector-result:1ae2"
+    },
+    {
+      "id": "f9441619-88af-4b2a-886e-d0d4467d8348",
+      "concept_ref": "le.core@1.0.0:unclassified-time-frequency-event",
+      "geometry": {
+        "type": "time_frequency_box",
+        "start_sample": 50120,
+        "end_sample": 50600,
+        "min_frequency_hz": 200,
+        "max_frequency_hz": 4800
+      },
+      "attributes": {
+        "note": "Short vertical transient"
+      }
+    }
+  ],
+  "relations": []
+}
