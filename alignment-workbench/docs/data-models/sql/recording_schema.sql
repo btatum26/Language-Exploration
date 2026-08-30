@@ -17,7 +17,7 @@ CREATE TABLE audio_assets (
     frame_count bigint NOT NULL CHECK (frame_count > 0),
     source_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
-    CHECK (length(sha256) = 64)
+    CHECK (sha256 ~ '^[0-9a-f]{64}$')
 );
 
 CREATE TABLE speakers (

@@ -11,10 +11,12 @@ Scope: Domain, persistence, service, producer, and application-interface validat
 - Attempting to replace a recording's audio fails.
 - Sample coordinates use the asset's native timebase.
 - Derived duration agrees with frame count and sample rate.
+- Uppercase SHA-256 input is canonicalized to lowercase.
 
 ## Library tests
 
 - Namespace and version uniqueness are enforced.
+- Namespace, version-label, and entry-key values use the same grammar as `ConceptRef`.
 - Published versions and entries cannot be mutated.
 - Old entry references resolve after newer versions are published.
 - An annotation cannot reference an entry outside the pinned manifest.
@@ -47,6 +49,14 @@ Scope: Domain, persistence, service, producer, and application-interface validat
 - Opaque provenance references round-trip unchanged.
 - Notes and entry-defined attributes round-trip unchanged.
 
+## Snapshot aggregate tests
+
+- Duplicate annotation IDs fail.
+- Duplicate pinned namespace-version pairs fail.
+- Point and interval geometry beyond the audio frame count fails.
+- A concept reference to an unpinned namespace-version pair fails.
+- Polygon vertices outside declared time-frequency bounds fail.
+
 ## Recording revision tests
 
 - First save creates revision 1 and sets the recording head.
@@ -58,7 +68,8 @@ Scope: Domain, persistence, service, producer, and application-interface validat
 - Restore creates a new head revision instead of deleting or rewinding later history.
 - Optional author and message are retained.
 - A failed save leaves the previous head unchanged.
-- Concurrent save attempts allocate distinct revision numbers or fail cleanly without partial state.
+- A save whose `expected_parent_revision_id` does not equal the current head fails as stale.
+- Concurrent saves from the same parent cannot silently overwrite one another.
 
 ## Repository and service tests
 

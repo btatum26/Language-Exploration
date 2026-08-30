@@ -43,6 +43,6 @@ The model records the current painted state. It does not execute analysis, retai
 - Time is stored in integer audio samples.
 - F0 is represented as sparse painted events, never as saved frame-by-frame data.
 - Analysis execution remains outside the source model.
-- History is linear, single-user, and snapshot-based rather than diff-based.
+- History is linear and snapshot-based rather than diff-based; stale concurrent saves are rejected.
 - Deleting an annotation never destroys an older revision.
 - Linguistic hierarchies are optional interpretations, not the foundation of the data. 

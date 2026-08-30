@@ -35,6 +35,7 @@ The complete payload example is in [annotated_recording_snapshot.json](examples/
 The client sends complete current snapshot state:
 
 - Recording ID
+- Expected parent revision ID, explicitly null for the first save
 - Name
 - Default speaker
 - Language
@@ -49,6 +50,7 @@ The client does not send diffs or editing commands.
 Before inserting data, the service validates:
 
 - The recording exists and its audio asset is unchanged.
+- The current head equals `expected_parent_revision_id`; otherwise the save is stale.
 - Existing annotation identities belong to this recording; new ones are allocated explicitly.
 - Geometry lies within the audio frame count and frequency limits.
 - Polygon geometry is valid.
@@ -63,13 +65,14 @@ Before inserting data, the service validates:
 Saving one revision is one PostgreSQL transaction:
 
 1. Lock the `recordings` row briefly with `SELECT ... FOR UPDATE`.
-2. Read the current head and allocate `revision_number = previous + 1`.
-3. Insert new annotation identity rows.
-4. Insert the immutable `recording_revisions` row.
-5. Insert the complete pinned library manifest.
-6. Bulk insert the complete annotation-state snapshot.
-7. Update `recordings.head_revision_id`.
-8. Commit.
+2. Compare the current head with `expected_parent_revision_id` and reject a mismatch as stale.
+3. Allocate `revision_number = previous + 1`.
+4. Insert new annotation identity rows.
+5. Insert the immutable `recording_revisions` row.
+6. Insert the complete pinned library manifest.
+7. Bulk insert the complete annotation-state snapshot.
+8. Update `recordings.head_revision_id`.
+9. Commit.
 
 Any failure rolls back the entire save and leaves the previous head unchanged.
 
@@ -138,6 +141,15 @@ Optional lanes may improve readability, but lanes are a view concern and are not
 
 ## Validation ownership
 
+The immutable domain models enforce:
+
+- Lowercase canonical SHA-256 values
+- Concept-compatible namespace, version-label, and entry-key shapes
+- Unique annotation IDs and pinned namespace-version pairs within a snapshot
+- Sample bounds against the snapshot audio frame count
+- Polygon vertices within declared time-frequency bounds
+- Concept namespace-version membership in the pinned manifest
+
 The database enforces:
 
 - Referential integrity and UUID identities
@@ -152,9 +164,9 @@ The application service enforces:
 - Audio immutability
 - Identity ownership by recording
 - Parent revision ownership
-- Sample bounds and Nyquist limits
-- Polygon validity
-- Library manifest membership
+- Expected-parent comparison against the current head
+- Sample bounds and Nyquist limits for save requests
+- Exact library entry resolution
 - Permitted geometry
 - Attribute JSON Schema validation
 - Immutable-row behavior

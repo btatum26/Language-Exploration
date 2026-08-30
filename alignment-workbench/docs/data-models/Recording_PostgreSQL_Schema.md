@@ -21,7 +21,7 @@ The annotation-library tables must exist before recording and annotation tables 
 | Column | Type | Rules |
 | --- | --- | --- |
 | `id` | UUID | Primary key |
-| `sha256` | VARCHAR(64) | Unique, required |
+| `sha256` | VARCHAR(64) | Unique, required lowercase hexadecimal SHA-256 |
 | `storage_key` | TEXT | Unique, required |
 | `logical_path` | TEXT | Optional display or import path |
 | `media_type` | TEXT | Optional |
@@ -123,7 +123,12 @@ Each `signal_annotation_states` row is the state of one annotation in one full r
 
 The primary key is `(recording_revision_id, annotation_id)`.
 
-Database checks cover geometry discriminators, non-negative starts, end ordering, frequency-column shape, frequency ordering, and confidence range. The application service enforces audio duration, Nyquist bounds, polygon validity, allowed geometry, manifest membership, and JSON Schema validation.
+Database checks cover geometry discriminators, non-negative starts, end ordering,
+frequency-column shape, frequency ordering, and confidence range. The immutable snapshot model
+enforces audio-frame bounds, polygon bounds, identifier uniqueness, and pinned namespace-version
+membership. The application service rechecks submitted save state against stored audio and library
+data, including Nyquist bounds, exact entry resolution, allowed geometry, and JSON Schema
+validation.
 
 ## Recommended indexes
 

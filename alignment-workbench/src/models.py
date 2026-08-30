@@ -14,11 +14,22 @@ from pydantic import (
     ConfigDict,
     Field,
     RootModel,
+    StringConstraints,
     field_validator,
     model_validator,
 )
 
-Sha256 = Annotated[str, Field(pattern=r"^[0-9a-fA-F]{64}$")]
+_NAMESPACE_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+_VERSION_LABEL_PATTERN = r"[^:\s]+"
+_ENTRY_KEY_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]*"
+
+Sha256 = Annotated[
+    str,
+    StringConstraints(to_lower=True, pattern=r"^[0-9a-fA-F]{64}$"),
+]
+Namespace = Annotated[str, StringConstraints(pattern=rf"^{_NAMESPACE_PATTERN}$")]
+VersionLabel = Annotated[str, StringConstraints(pattern=rf"^{_VERSION_LABEL_PATTERN}$")]
+EntryKey = Annotated[str, StringConstraints(pattern=rf"^{_ENTRY_KEY_PATTERN}$")]
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 GeometryType = Literal[
     "point",
@@ -28,9 +39,9 @@ GeometryType = Literal[
 ]
 
 _CONCEPT_REF_PATTERN = re.compile(
-    r"^(?P<namespace>[A-Za-z0-9][A-Za-z0-9._-]*)"
-    r"@(?P<version>[^:\s]+)"
-    r":(?P<entry_key>[A-Za-z0-9][A-Za-z0-9._-]*)$"
+    rf"^(?P<namespace>{_NAMESPACE_PATTERN})"
+    rf"@(?P<version>{_VERSION_LABEL_PATTERN})"
+    rf":(?P<entry_key>{_ENTRY_KEY_PATTERN})$"
 )
 
 
@@ -245,6 +256,11 @@ class TimeFrequencyPolygonGeometry(DomainModel):
             raise ValueError("end_sample must be greater than start_sample")
         if self.max_frequency_hz <= self.min_frequency_hz:
             raise ValueError("max_frequency_hz must be greater than min_frequency_hz")
+        for vertex in self.vertices:
+            if not self.start_sample <= vertex.sample <= self.end_sample:
+                raise ValueError("polygon vertex sample lies outside declared bounds")
+            if not self.min_frequency_hz <= vertex.frequency_hz <= self.max_frequency_hz:
+                raise ValueError("polygon vertex frequency lies outside declared bounds")
         return self
 
 
@@ -272,7 +288,7 @@ class SignalAnnotation(DomainModel):
 
 class Library(DomainModel):
     id: UUID
-    namespace: NonEmptyStr
+    namespace: Namespace
     name: NonEmptyStr
     description: str | None = None
     owner_label: str | None = None
@@ -281,7 +297,7 @@ class Library(DomainModel):
 class LibraryEntry(DomainModel):
     id: UUID
     library_version_id: UUID
-    entry_key: NonEmptyStr
+    entry_key: EntryKey
     display_name: NonEmptyStr
     description: str
     allowed_geometry_types: tuple[GeometryType, ...] = Field(min_length=1)
@@ -304,10 +320,11 @@ class LibraryEntry(DomainModel):
         "metadata",
     )(_freeze_json_object)
 
+
 class LibraryVersion(DomainModel):
     id: UUID
     library_id: UUID
-    version_label: NonEmptyStr
+    version_label: VersionLabel
     content_sha256: Sha256
     created_at: datetime
     author: str | None = None
@@ -326,8 +343,8 @@ class LibraryVersion(DomainModel):
 class PinnedLibraryVersion(DomainModel):
     """Portable snapshot manifest reference to one immutable publication."""
 
-    namespace: NonEmptyStr
-    version: NonEmptyStr
+    namespace: Namespace
+    version: VersionLabel
     content_sha256: Sha256
 
 
@@ -361,11 +378,40 @@ class AnnotatedRecordingSnapshot(DomainModel):
     libraries: tuple[PinnedLibraryVersion, ...]
     annotations: tuple[SignalAnnotation, ...]
 
+    @model_validator(mode="after")
+    def validate_aggregate(self) -> AnnotatedRecordingSnapshot:
+        annotation_ids = [annotation.id for annotation in self.annotations]
+        if len(annotation_ids) != len(set(annotation_ids)):
+            raise ValueError("annotation IDs must be unique within a snapshot")
+
+        pinned_versions = [(library.namespace, library.version) for library in self.libraries]
+        if len(pinned_versions) != len(set(pinned_versions)):
+            raise ValueError("pinned namespace@version pairs must be unique")
+        pinned_version_set = set(pinned_versions)
+
+        for annotation in self.annotations:
+            geometry = annotation.geometry
+            if isinstance(geometry, PointGeometry):
+                if geometry.start_sample >= self.audio_asset.frame_count:
+                    raise ValueError("point geometry lies beyond the audio frame count")
+            elif geometry.end_sample > self.audio_asset.frame_count:
+                raise ValueError("annotation geometry lies beyond the audio frame count")
+
+            concept_version = (
+                annotation.concept_ref.namespace,
+                annotation.concept_ref.version,
+            )
+            if concept_version not in pinned_version_set:
+                raise ValueError("annotation concept references an unpinned library version")
+
+        return self
+
 
 class SaveRecordingSnapshotRequest(DomainModel):
     """Complete editable state submitted to create the next revision."""
 
     recording_id: UUID
+    expected_parent_revision_id: UUID | None
     name: NonEmptyStr
     default_speaker_ref: str | None = None
     language: NonEmptyStr

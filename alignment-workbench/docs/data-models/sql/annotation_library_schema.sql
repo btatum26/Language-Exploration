@@ -6,7 +6,9 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE annotation_libraries (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    namespace text NOT NULL UNIQUE,
+    namespace text NOT NULL UNIQUE CHECK (
+        namespace ~ '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+    ),
     name text NOT NULL,
     description text,
     owner_label text,
@@ -16,20 +18,24 @@ CREATE TABLE annotation_libraries (
 CREATE TABLE annotation_library_versions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     library_id uuid NOT NULL REFERENCES annotation_libraries(id),
-    version_label text NOT NULL,
+    version_label text NOT NULL CHECK (
+        version_label ~ '^[^[:space:]:]+$'
+    ),
     content_sha256 varchar(64) NOT NULL,
     author text,
     description text,
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (library_id, version_label),
     UNIQUE (library_id, content_sha256),
-    CHECK (length(content_sha256) = 64)
+    CHECK (content_sha256 ~ '^[0-9a-f]{64}$')
 );
 
 CREATE TABLE annotation_library_entries (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     library_version_id uuid NOT NULL REFERENCES annotation_library_versions(id),
-    entry_key text NOT NULL,
+    entry_key text NOT NULL CHECK (
+        entry_key ~ '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+    ),
     display_name text NOT NULL,
     description text NOT NULL,
     allowed_geometry_types jsonb NOT NULL,

@@ -20,6 +20,9 @@ Each library has:
 - Optional description
 - Optional owner or producer label
 
+Namespaces use the same grammar as the namespace component of `ConceptRef`: they begin with an
+ASCII letter or digit and then contain only ASCII letters, digits, `.`, `_`, or `-`.
+
 Example namespaces include:
 
 ```text
@@ -38,12 +41,14 @@ Every published `AnnotationLibraryVersion` is immutable. A version contains:
 - Library-version UUID
 - Parent library UUID
 - Version label such as `1.0.0`
-- Content hash
+- Lowercase hexadecimal content SHA-256
 - Creation timestamp
 - Optional author and description
 - Complete entry set
 
-Semantic versioning is useful but not required. A library may use semantic versions, producer model versions, dates, or opaque version labels.
+Semantic versioning is useful but not required. A library may use semantic versions, producer
+model versions, dates, or opaque version labels. A version label cannot contain whitespace or
+`:` so it is always valid inside a `ConceptRef`.
 
 ## Library entry
 
@@ -59,6 +64,9 @@ Each immutable entry contains:
 - Optional validation hints
 - Optional display hints
 - Arbitrary metadata
+
+Entry keys use the same grammar as namespaces so they are always valid as the final component of
+a `ConceptRef`.
 
 An annotation entry may look like:
 
@@ -114,6 +122,9 @@ le.prosody@1.0.0:pitch-fall
 ```
 
 Each recording revision also pins a manifest of every library version used in its snapshot. This makes dependencies inspectable and keeps exported snapshots portable.
+
+The snapshot rejects duplicate pinned `namespace@version` pairs and annotations whose concept
+namespace and version are absent from that manifest.
 
 ## Unclassified entries
 

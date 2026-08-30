@@ -23,7 +23,7 @@ The complete representative DDL is in [annotation_library_schema.sql](sql/annota
 | Column | Type | Rules |
 | --- | --- | --- |
 | `id` | UUID | Primary key |
-| `namespace` | TEXT | Unique, required |
+| `namespace` | TEXT | Unique, required, concept-compatible identifier |
 | `name` | TEXT | Required |
 | `description` | TEXT | Optional |
 | `owner_label` | TEXT | Optional |
@@ -37,8 +37,8 @@ The complete representative DDL is in [annotation_library_schema.sql](sql/annota
 | --- | --- | --- |
 | `id` | UUID | Primary key |
 | `library_id` | UUID | Required FK to `annotation_libraries` |
-| `version_label` | TEXT | Required |
-| `content_sha256` | VARCHAR(64) | Required |
+| `version_label` | TEXT | Required, no whitespace or `:` |
+| `content_sha256` | VARCHAR(64) | Required lowercase hexadecimal SHA-256 |
 | `author` | TEXT | Optional |
 | `description` | TEXT | Optional |
 | `created_at` | TIMESTAMPTZ | Required, default now |
@@ -47,7 +47,7 @@ Constraints:
 
 - Unique `(library_id, version_label)`
 - Unique `(library_id, content_sha256)`
-- A 64-character content hash
+- A 64-character lowercase hexadecimal content hash
 - Immutable rows after publication
 
 ## Annotation library entries table
@@ -58,7 +58,7 @@ Constraints:
 | --- | --- | --- |
 | `id` | UUID | Primary key and exact concept pointer target |
 | `library_version_id` | UUID | Required FK to `annotation_library_versions` |
-| `entry_key` | TEXT | Required |
+| `entry_key` | TEXT | Required, concept-compatible identifier |
 | `display_name` | TEXT | Required |
 | `description` | TEXT | Required |
 | `allowed_geometry_types` | JSONB | Required non-empty array of geometry discriminators |
@@ -70,6 +70,8 @@ Constraints:
 Constraints:
 
 - Unique `(library_version_id, entry_key)`
+- Namespace and entry key begin with an ASCII alphanumeric and otherwise contain only ASCII alphanumerics, `.`, `_`, or `-`.
+- Version labels contain neither whitespace nor `:`.
 - Allowed geometry is a non-empty array containing only supported geometry discriminators.
 - Rows are immutable after publication.
 

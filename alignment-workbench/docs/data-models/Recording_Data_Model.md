@@ -12,7 +12,7 @@ Annotations may describe word or phone hypotheses, pitch events, breaths, pauses
 
 ## Version-one assumptions
 
-- There is one user/editor. Multi-user conflict resolution, merging, permissions, and collaborative locking are out of scope.
+- Concurrent editors may load the same revision. Stale saves are rejected; merging, permissions, and collaborative locking are out of scope.
 - Revision history is linear. Every Save creates the next immutable recording revision.
 - Each revision is a full snapshot, not a list of diffs or commands.
 - Audio is immutable. Edited or replaced audio creates a new recording.
@@ -43,7 +43,7 @@ An `AudioAsset` identifies the exact immutable audio bytes being annotated. It c
 Required properties are:
 
 - Stable ID
-- SHA-256 of the original bytes
+- Lowercase hexadecimal SHA-256 of the original bytes
 - Logical or remote storage key
 - Media type, container, codec, or original extension when available
 - Sample rate
@@ -146,15 +146,20 @@ An optional rendering transform may be retained in annotation attributes, but it
 
 ## Geometry invariants
 
-The application service enforces:
+Geometry models and `AnnotatedRecordingSnapshot` enforce:
 
 - `start_sample >= 0`
 - Point positions are less than the audio frame count.
 - Interval ends are greater than starts and no greater than the frame count.
 - Frequencies are non-negative and maximum frequency exceeds minimum frequency.
-- Acoustic frequency bounds do not exceed the Nyquist frequency.
 - Polygon vertices lie inside the stored bounding box.
-- Geometry type is allowed by the referenced library entry.
+- Annotation IDs are unique within the snapshot.
+- Pinned namespace and version pairs are unique within the snapshot.
+- Every annotation's concept namespace and version are pinned by the snapshot.
+
+The application service enforces acoustic bounds against the Nyquist frequency, resolves the
+exact library entry, checks that the geometry type is allowed, and validates attributes against
+the entry's JSON Schema.
 
 The core model allows exact geometric duplicates, partial overlap, full containment, cross-category overlap, competing annotations, and unannotated gaps. Optional library rules may be stricter, but they do not become universal database constraints.
 
@@ -204,9 +209,13 @@ Each revision stores its number, parent revision, timestamp, optional author, an
 
 Restore does not move the head backward or delete later history. To restore revision 3 while revision 7 is current, the service loads revision 3 and saves that state as revision 8, with a message such as `Restore revision 3`.
 
-### Single-user behavior
+### Concurrent save behavior
 
-Version one does not require optimistic merge handling or edit locks. A save transaction may briefly lock the stable recording row to allocate the next revision number and update the head atomically. This is database correctness, not collaborative version control.
+Every save request carries `expected_parent_revision_id`, which is the head revision loaded by
+the editor. The save transaction briefly locks the stable recording row and compares its current
+head with that expected parent. A mismatch rejects the request as stale without creating a
+revision. A match allocates the next revision number and updates the head atomically. The first
+save explicitly sends a null expected parent.
 
 ## Deferred decisions
 
