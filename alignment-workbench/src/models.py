@@ -53,11 +53,11 @@ class _FrozenJsonObject(dict[str, Any]):
         raise TypeError("JSON objects in domain models are immutable")
 
     __delitem__ = _reject_mutation
-    __ior__ = _reject_mutation
+    __ior__ = _reject_mutation  # type: ignore[assignment]
     __setitem__ = _reject_mutation
     clear = _reject_mutation
     pop = _reject_mutation
-    popitem = _reject_mutation
+    popitem = _reject_mutation  # type: ignore[assignment]
     setdefault = _reject_mutation
     update = _reject_mutation
 
@@ -88,9 +88,7 @@ def _freeze_json_value(value: Any) -> Any:
     if isinstance(value, list):
         return tuple(_freeze_json_value(item) for item in value)
     if isinstance(value, dict):
-        return _FrozenJsonObject(
-            {key: _freeze_json_value(item) for key, item in value.items()}
-        )
+        return _FrozenJsonObject({key: _freeze_json_value(item) for key, item in value.items()})
     return value
 
 
@@ -265,10 +263,7 @@ class TimeFrequencyPolygonGeometry(DomainModel):
 
 
 Geometry = Annotated[
-    PointGeometry
-    | TimeIntervalGeometry
-    | TimeFrequencyBoxGeometry
-    | TimeFrequencyPolygonGeometry,
+    PointGeometry | TimeIntervalGeometry | TimeFrequencyBoxGeometry | TimeFrequencyPolygonGeometry,
     Field(discriminator="type"),
 ]
 
@@ -372,7 +367,7 @@ class AnnotatedRecordingSnapshot(DomainModel):
     recording_id: UUID
     revision: RevisionMetadata
     name: NonEmptyStr
-    default_speaker_ref: str | None = None
+    default_speaker_ref: UUID | None = None
     language: NonEmptyStr
     audio_asset: AudioAsset
     libraries: tuple[PinnedLibraryVersion, ...]
@@ -413,7 +408,7 @@ class SaveRecordingSnapshotRequest(DomainModel):
     recording_id: UUID
     expected_parent_revision_id: UUID | None
     name: NonEmptyStr
-    default_speaker_ref: str | None = None
+    default_speaker_ref: UUID | None = None
     language: NonEmptyStr
     author: str | None = None
     message: str | None = None

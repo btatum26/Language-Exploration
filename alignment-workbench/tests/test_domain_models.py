@@ -9,7 +9,7 @@ from uuid import UUID
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from models import (
+from src.models import (
     AnnotatedRecordingSnapshot,
     ConceptRef,
     Geometry,
@@ -140,9 +140,7 @@ def test_library_identifiers_match_concept_ref_components() -> None:
     with pytest.raises(ValidationError):
         Library(id=library.id, namespace="contains spaces", name="Invalid")
     with pytest.raises(ValidationError):
-        LibraryVersion.model_validate(
-            {**version.model_dump(), "version_label": "contains spaces"}
-        )
+        LibraryVersion.model_validate({**version.model_dump(), "version_label": "contains spaces"})
     with pytest.raises(ValidationError):
         LibraryEntry(
             **{

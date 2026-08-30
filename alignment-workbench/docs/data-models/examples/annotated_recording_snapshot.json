@@ -10,7 +10,7 @@
     "message": "Adjusted pitch event and added transient"
   },
   "name": "Italian comparison 001",
-  "default_speaker_ref": "speaker:luca",
+  "default_speaker_ref": "6b156f04-4070-4c4f-9dd7-6ea4e5b9cf66",
   "language": "it",
   "audio_asset": {
     "id": "f24a602b-5c44-414a-8799-480ada11334d",
