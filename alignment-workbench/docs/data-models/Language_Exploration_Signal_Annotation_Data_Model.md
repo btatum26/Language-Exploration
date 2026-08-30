@@ -12,14 +12,14 @@ Language Exploration uses a neutral source model into which independent producer
 
 The canonical saved object is an **Annotated Recording Snapshot**:
 
-> One immutable audio asset, recording metadata, a pinned set of annotation-library definitions, and the complete annotations and explicit relations that constitute one saved revision.
+> One immutable audio asset, recording metadata, a pinned set of annotation-library definitions, and the complete annotations that constitute one saved revision.
 
 The model records the current painted state. It does not execute analysis, retain analysis jobs, or store dense frame-by-frame feature tracks.
 
 ## Documents
 
-- [Recording data model](Recording_Data_Model.md) describes recordings, annotations, geometry, relations, and recording version history.
-- [Recording PostgreSQL schema](Recording_PostgreSQL_Schema.md) describes persistence for audio assets, recordings, revision snapshots, annotations, and relations.
+- [Recording data model](Recording_Data_Model.md) describes recordings, annotations, geometry, and recording version history.
+- [Recording PostgreSQL schema](Recording_PostgreSQL_Schema.md) describes persistence for audio assets, recordings, revision snapshots, and annotations.
 - [Annotation library data model](Annotation_Library_Data_Model.md) describes reusable annotation meanings and immutable library version history.
 - [Annotation library PostgreSQL schema](Annotation_Library_PostgreSQL_Schema.md) describes persistence for libraries, versions, and entries.
 - [Analysis notes](Analysis_Notes.md) defines the analysis boundary, sparse event representation, producer integration, and current-data migration.

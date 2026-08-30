@@ -52,10 +52,9 @@ Each immutable entry contains:
 - Entry UUID
 - Library-version UUID
 - Stable entry key within that version
-- Entry kind: `annotation` or `relation`
 - Display name
 - Description
-- Allowed geometry types for annotation entries
+- One or more allowed geometry types
 - JSON Schema for occurrence attributes
 - Optional validation hints
 - Optional display hints
@@ -66,7 +65,6 @@ An annotation entry may look like:
 ```json
 {
   "entry_key": "pitch-fall",
-  "entry_kind": "annotation",
   "display_name": "Pitch lowering",
   "description": "A sustained decline in estimated fundamental frequency.",
   "allowed_geometry_types": ["time_interval"],
@@ -89,9 +87,10 @@ An annotation entry may look like:
 
 Display hints are defaults, not semantic truth. An application may ignore them.
 
-## Entry kinds
+## Paintable concepts
 
-Annotation entries define concepts that can be painted over audio. Examples include:
+Every library entry defines a concept that can be painted over audio as a `SignalAnnotation`.
+Examples include:
 
 - `core:silence`
 - `core:breath`
@@ -100,11 +99,9 @@ Annotation entries define concepts that can be painted over audio. Examples incl
 - `ipa:open-front-unrounded-vowel`
 - `spectral:broadband-transient`
 
-Relation entries define semantic links between two annotations, such as `realizes`, `supports`, or `alternative-to`. Relation entries have no allowed geometry.
-
 ## Concept pointers
 
-PostgreSQL annotations and relations point directly to an immutable entry UUID. JSON interchange uses a human-readable reference:
+PostgreSQL annotations point directly to an immutable entry UUID. JSON interchange uses a human-readable reference:
 
 ```text
 namespace@version:entry-key

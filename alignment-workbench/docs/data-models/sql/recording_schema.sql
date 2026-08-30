@@ -115,30 +115,6 @@ CREATE TABLE signal_annotation_states (
     )
 );
 
-CREATE TABLE annotation_relation_identities (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    recording_id uuid NOT NULL REFERENCES recordings(id),
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE annotation_relation_states (
-    recording_revision_id uuid NOT NULL REFERENCES recording_revisions(id),
-    relation_id uuid NOT NULL REFERENCES annotation_relation_identities(id),
-    library_entry_id uuid NOT NULL REFERENCES annotation_library_entries(id),
-    source_annotation_id uuid NOT NULL,
-    target_annotation_id uuid NOT NULL,
-    attributes jsonb NOT NULL DEFAULT '{}'::jsonb,
-    confidence double precision CHECK (
-        confidence IS NULL OR (confidence >= 0 AND confidence <= 1)
-    ),
-    note text,
-    PRIMARY KEY (recording_revision_id, relation_id),
-    FOREIGN KEY (recording_revision_id, source_annotation_id)
-        REFERENCES signal_annotation_states(recording_revision_id, annotation_id),
-    FOREIGN KEY (recording_revision_id, target_annotation_id)
-        REFERENCES signal_annotation_states(recording_revision_id, annotation_id)
-);
-
 CREATE INDEX ix_signal_annotation_states_time
 ON signal_annotation_states(recording_revision_id, start_sample, end_sample);
 
@@ -148,15 +124,9 @@ ON signal_annotation_states(library_entry_id);
 CREATE INDEX ix_signal_annotation_states_identity_revision
 ON signal_annotation_states(annotation_id, recording_revision_id);
 
-CREATE INDEX ix_annotation_relation_states_source
-ON annotation_relation_states(recording_revision_id, source_annotation_id);
-
-CREATE INDEX ix_annotation_relation_states_target
-ON annotation_relation_states(recording_revision_id, target_annotation_id);
-
 -- The production migration or repository layer must also enforce:
 --   * recordings.audio_asset_id cannot change;
 --   * revision parents and heads belong to the same recording;
---   * annotation and relation identities belong to the recording;
+--   * annotation identities belong to the recording;
 --   * referenced entries belong to the pinned library manifest;
---   * saved revisions, manifests, annotations, and relations are immutable.
+--   * saved revisions, manifests, and annotations are immutable.

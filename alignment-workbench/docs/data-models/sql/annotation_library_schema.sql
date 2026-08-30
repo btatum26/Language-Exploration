@@ -30,18 +30,23 @@ CREATE TABLE annotation_library_entries (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     library_version_id uuid NOT NULL REFERENCES annotation_library_versions(id),
     entry_key text NOT NULL,
-    entry_kind text NOT NULL CHECK (entry_kind IN ('annotation', 'relation')),
     display_name text NOT NULL,
     description text NOT NULL,
-    allowed_geometry_types jsonb NOT NULL DEFAULT '[]'::jsonb,
+    allowed_geometry_types jsonb NOT NULL,
     attribute_schema jsonb NOT NULL DEFAULT '{"type":"object"}'::jsonb,
     validation_hints jsonb NOT NULL DEFAULT '{}'::jsonb,
     display_hints jsonb NOT NULL DEFAULT '{}'::jsonb,
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     UNIQUE (library_version_id, entry_key),
     CHECK (
-        entry_kind = 'annotation'
-        OR allowed_geometry_types = '[]'::jsonb
+        jsonb_typeof(allowed_geometry_types) = 'array'
+        AND jsonb_array_length(allowed_geometry_types) > 0
+        AND allowed_geometry_types <@ '[
+            "point",
+            "time_interval",
+            "time_frequency_box",
+            "time_frequency_polygon"
+        ]'::jsonb
     )
 );
 

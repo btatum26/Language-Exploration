@@ -96,7 +96,7 @@ Concepts to replace or demote include:
 
 - `AlignmentSegment` becomes a producer-output DTO rather than the canonical entity.
 - A fixed `segments.kind` set becomes a library-entry reference.
-- `parent_segment_id` becomes an optional typed relation where semantic information requires it.
+- `parent_segment_id` is not canonical; a producer may preserve the source value in annotation attributes when needed for traceability.
 - Same-tier overlap QC leaves core validation.
 - `segment_revisions` become full recording-revision snapshots.
 - `alignment_results` may remain in an external analysis subsystem but is not required by the source model.

@@ -2,7 +2,7 @@
 
 Status: Proposed
 
-Scope: Stable recording identity, immutable saved revisions, signal annotations, and relations
+Scope: Stable recording identity, immutable saved revisions, and signal annotations
 
 ## Purpose
 
@@ -66,7 +66,7 @@ A `Recording` is the stable identity of an annotated document over one audio ass
 - Current or head revision reference
 - Creation timestamp
 
-Correctable values do not belong to the stable recording row. Display name, speaker, language, notes, library imports, annotations, and relations belong to each revision snapshot.
+Correctable values do not belong to the stable recording row. Display name, speaker, language, notes, library imports, and annotations belong to each revision snapshot.
 
 ## Recording revision
 
@@ -83,7 +83,6 @@ A `RecordingRevision` is one immutable saved snapshot of the fully painted recor
 - Timestamp
 - Complete pinned library manifest
 - Complete annotation state
-- Complete explicit relation state
 
 The parent link expresses linear history. It is not a branch or merge mechanism.
 
@@ -99,7 +98,7 @@ A `SignalAnnotation` is one painted occurrence over the audio. It has:
 - Optional note
 - Optional opaque provenance reference
 
-An annotation does not own other annotations. A semantic association between annotations is represented by an optional relation.
+Annotations are independent painted occurrences. The core model does not store links between them.
 
 ## Coordinate model
 
@@ -176,25 +175,9 @@ import:textgrid:sha256:...
 
 A short free-text note may capture occurrence-specific observations. It must not substitute for a reusable library definition.
 
-## Annotation relations
-
-An `AnnotationRelation` connects two annotations when temporal geometry alone is insufficient. Examples include `realizes`, `associated-with`, `supports`, `contradicts`, `alternative-to`, `corresponds-to`, and `derived-interpretation-of`.
-
-A relation contains:
-
-- Stable relation ID across revisions
-- Relation-library entry reference
-- Source annotation ID
-- Target annotation ID
-- Optional attributes, confidence, and note
-
-Both endpoints must exist in the same recording revision. Relations are directed even when a library describes one as conceptually symmetric.
-
-Overlap, containment, order, adjacency, and equal boundaries are calculated from coordinates and normally are not stored as relations.
-
 ## Recording version history
 
-Every explicit Save creates a complete immutable revision containing all current annotations and relations. The system stores snapshots rather than operations.
+Every explicit Save creates a complete immutable revision containing all current annotations. The system stores snapshots rather than operations.
 
 ```text
 Revision 1: A, B, C
@@ -231,7 +214,6 @@ The foundation does not decide:
 
 - Multi-speaker annotations
 - Per-annotation language overrides
-- Cross-recording relations
 - Dense measurement storage
 - Branching or collaborative revision control
 - Advanced geometric masks

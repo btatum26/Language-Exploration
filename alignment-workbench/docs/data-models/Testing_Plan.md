@@ -19,7 +19,7 @@ Scope: Domain, persistence, service, producer, and application-interface validat
 - Old entry references resolve after newer versions are published.
 - An annotation cannot reference an entry outside the pinned manifest.
 - Attribute schema validation covers valid and invalid values.
-- Relation entries cannot be used as annotation concepts and annotation entries cannot be used as relations.
+- Every entry permits at least one supported geometry type.
 - Reusing an entry key in a new version does not change old-version semantics.
 - A referenced library version cannot be deleted.
 
@@ -60,21 +60,12 @@ Scope: Domain, persistence, service, producer, and application-interface validat
 - A failed save leaves the previous head unchanged.
 - Concurrent save attempts allocate distinct revision numbers or fail cleanly without partial state.
 
-## Relation tests
-
-- Both endpoints must exist in the same submitted snapshot.
-- Deleted endpoints cannot leave relations in the next snapshot.
-- Relation identity belongs to the recording.
-- Relation entries have the correct entry kind.
-- Relation attribute schemas validate.
-- Derived geometric relationships do not need stored relations.
-
 ## Repository and service tests
 
 - Current snapshot reads resolve the head revision.
 - Historical reads use the requested pinned library versions.
-- History listings return compact metadata and correct annotation and relation counts.
-- Save inserts the revision, manifest, annotation states, relation states, and head update atomically.
+- History listings return compact metadata and the correct annotation count.
+- Save inserts the revision, manifest, annotation states, and head update atomically.
 - Any validation or insert failure rolls back all new rows.
 - Producers and GUI-facing services work through domain interfaces without importing table mappings.
 
@@ -90,7 +81,7 @@ Scope: Domain, persistence, service, producer, and application-interface validat
 ## Workbench and interchange tests
 
 - Workbench save and load round-trip a snapshot without semantic loss.
-- JSON export and import preserve recording, revision, audio, library, annotation, and relation identities.
+- JSON export and import preserve recording, revision, audio, library, and annotation identities.
 - The complete example snapshot validates against the application DTO or schema when one exists.
 - Overlapping annotations render without being rejected as tier collisions.
 - Visibility filters do not mutate canonical state.

@@ -2,7 +2,7 @@
 
 Status: Proposed
 
-Scope: Audio assets, stable recordings, full revision snapshots, annotations, and relations
+Scope: Audio assets, stable recordings, full revision snapshots, and annotations
 
 ## Requirements and dependencies
 
@@ -87,7 +87,7 @@ Constraints and service rules:
 | `recording_revision_id` | UUID | FK, part of primary key |
 | `library_version_id` | UUID | FK, part of primary key |
 
-An annotation or relation in a revision may reference only an entry belonging to one of these pinned versions.
+An annotation in a revision may reference only an entry belonging to one of these pinned versions.
 
 ## Annotation identities table
 
@@ -125,29 +125,6 @@ The primary key is `(recording_revision_id, annotation_id)`.
 
 Database checks cover geometry discriminators, non-negative starts, end ordering, frequency-column shape, frequency ordering, and confidence range. The application service enforces audio duration, Nyquist bounds, polygon validity, allowed geometry, manifest membership, and JSON Schema validation.
 
-## Relation identities table
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `id` | UUID | Primary key |
-| `recording_id` | UUID | Required FK to `recordings` |
-| `created_at` | TIMESTAMPTZ | Required, default now |
-
-## Relation states table
-
-| Column | Type | Rules |
-| --- | --- | --- |
-| `recording_revision_id` | UUID | FK, part of primary key |
-| `relation_id` | UUID | FK, part of primary key |
-| `library_entry_id` | UUID | Required FK to a relation entry |
-| `source_annotation_id` | UUID | Required |
-| `target_annotation_id` | UUID | Required |
-| `attributes` | JSONB | Required, default `{}` |
-| `confidence` | DOUBLE PRECISION | Optional, `[0,1]` |
-| `note` | TEXT | Optional |
-
-Composite foreign keys require both endpoints to exist in `signal_annotation_states` for the same revision.
-
 ## Recommended indexes
 
 At minimum:
@@ -158,12 +135,10 @@ recording_revisions(recording_id, revision_number DESC) UNIQUE
 signal_annotation_states(recording_revision_id, start_sample, end_sample)
 signal_annotation_states(library_entry_id)
 signal_annotation_states(annotation_id, recording_revision_id)
-annotation_relation_states(recording_revision_id, source_annotation_id)
-annotation_relation_states(recording_revision_id, target_annotation_id)
 ```
 
 Add a GIN index on `attributes` only after query patterns justify it. A GiST range index may later accelerate interval-overlap queries but is not required initially.
 
 ## Immutability
 
-Database triggers or repository rules should reject updates and deletes to recording revisions and saved annotation or relation states. Ordinary application behavior inserts a complete new revision and then atomically advances `recordings.head_revision_id`.
+Database triggers or repository rules should reject updates and deletes to recording revisions and saved annotation states. Ordinary application behavior inserts a complete new revision and then atomically advances `recordings.head_revision_id`.

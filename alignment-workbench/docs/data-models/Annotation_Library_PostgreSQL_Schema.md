@@ -52,17 +52,16 @@ Constraints:
 
 ## Annotation library entries table
 
-`annotation_library_entries` stores the exact targets referenced by annotations and relations.
+`annotation_library_entries` stores the exact concepts referenced by annotations.
 
 | Column | Type | Rules |
 | --- | --- | --- |
 | `id` | UUID | Primary key and exact concept pointer target |
 | `library_version_id` | UUID | Required FK to `annotation_library_versions` |
 | `entry_key` | TEXT | Required |
-| `entry_kind` | TEXT | `annotation` or `relation` |
 | `display_name` | TEXT | Required |
 | `description` | TEXT | Required |
-| `allowed_geometry_types` | JSONB | Required array for annotation entries |
+| `allowed_geometry_types` | JSONB | Required non-empty array of geometry discriminators |
 | `attribute_schema` | JSONB | Required JSON Schema, default object schema |
 | `validation_hints` | JSONB | Required, default `{}` |
 | `display_hints` | JSONB | Required, default `{}` |
@@ -71,19 +70,16 @@ Constraints:
 Constraints:
 
 - Unique `(library_version_id, entry_key)`
-- `entry_kind IN ('annotation', 'relation')`
-- Relation entries have an empty allowed-geometry array.
+- Allowed geometry is a non-empty array containing only supported geometry discriminators.
 - Rows are immutable after publication.
 
 ## Recording integration
 
-Recording revisions pin library versions through `recording_revision_libraries`, described in [Recording PostgreSQL Schema](Recording_PostgreSQL_Schema.md). Annotation and relation state rows reference `annotation_library_entries.id` directly.
+Recording revisions pin library versions through `recording_revision_libraries`, described in [Recording PostgreSQL Schema](Recording_PostgreSQL_Schema.md). Annotation state rows reference `annotation_library_entries.id` directly.
 
 The application service enforces that:
 
 - Every referenced entry belongs to a library version pinned by the recording revision.
-- Annotation state references an annotation entry.
-- Relation state references a relation entry.
 - Geometry type is permitted by the entry.
 - Occurrence attributes validate against the entry's JSON Schema.
 
