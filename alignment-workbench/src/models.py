@@ -133,7 +133,7 @@ class AudioAsset(DomainModel):
 
     id: UUID
     sha256: Sha256
-    storage_key: NonEmptyStr
+    storage_uri: NonEmptyStr
     logical_path: str | None = None
     media_type: str | None = None
     original_extension: str | None = None
@@ -375,30 +375,57 @@ class AnnotatedRecordingSnapshot(DomainModel):
 
     @model_validator(mode="after")
     def validate_aggregate(self) -> AnnotatedRecordingSnapshot:
-        annotation_ids = [annotation.id for annotation in self.annotations]
-        if len(annotation_ids) != len(set(annotation_ids)):
-            raise ValueError("annotation IDs must be unique within a snapshot")
+        _validate_snapshot_contents(self.libraries, self.annotations, self.audio_asset)
+        return self
 
-        pinned_versions = [(library.namespace, library.version) for library in self.libraries]
-        if len(pinned_versions) != len(set(pinned_versions)):
-            raise ValueError("pinned namespace@version pairs must be unique")
-        pinned_version_set = set(pinned_versions)
 
-        for annotation in self.annotations:
-            geometry = annotation.geometry
-            if isinstance(geometry, PointGeometry):
-                if geometry.start_sample >= self.audio_asset.frame_count:
-                    raise ValueError("point geometry lies beyond the audio frame count")
-            elif geometry.end_sample > self.audio_asset.frame_count:
-                raise ValueError("annotation geometry lies beyond the audio frame count")
+def _validate_snapshot_contents(
+    libraries: tuple[PinnedLibraryVersion, ...],
+    annotations: tuple[SignalAnnotation, ...],
+    audio_asset: AudioAsset | None = None,
+) -> None:
+    annotation_ids = [annotation.id for annotation in annotations]
+    if len(annotation_ids) != len(set(annotation_ids)):
+        raise ValueError("annotation IDs must be unique within a snapshot")
 
-            concept_version = (
-                annotation.concept_ref.namespace,
-                annotation.concept_ref.version,
-            )
-            if concept_version not in pinned_version_set:
-                raise ValueError("annotation concept references an unpinned library version")
+    pinned_versions = [(library.namespace, library.version) for library in libraries]
+    if len(pinned_versions) != len(set(pinned_versions)):
+        raise ValueError("pinned namespace@version pairs must be unique")
+    pinned_version_set = set(pinned_versions)
 
+    for annotation in annotations:
+        concept_version = (
+            annotation.concept_ref.namespace,
+            annotation.concept_ref.version,
+        )
+        if concept_version not in pinned_version_set:
+            raise ValueError("annotation concept references an unpinned library version")
+        if audio_asset is None:
+            continue
+        geometry = annotation.geometry
+        if isinstance(geometry, PointGeometry):
+            if geometry.start_sample >= audio_asset.frame_count:
+                raise ValueError("point geometry lies beyond the audio frame count")
+        elif geometry.end_sample > audio_asset.frame_count:
+            raise ValueError("annotation geometry lies beyond the audio frame count")
+
+
+class CreateRecordingRequest(DomainModel):
+    """Complete initial state submitted to create a recording and revision one."""
+
+    recording_id: UUID
+    audio_asset: AudioAsset
+    name: NonEmptyStr
+    default_speaker_ref: UUID | None = None
+    language: NonEmptyStr
+    author: str | None = None
+    message: str | None = None
+    libraries: tuple[PinnedLibraryVersion, ...]
+    annotations: tuple[SignalAnnotation, ...]
+
+    @model_validator(mode="after")
+    def validate_aggregate(self) -> CreateRecordingRequest:
+        _validate_snapshot_contents(self.libraries, self.annotations, self.audio_asset)
         return self
 
 
@@ -414,3 +441,8 @@ class SaveRecordingSnapshotRequest(DomainModel):
     message: str | None = None
     libraries: tuple[PinnedLibraryVersion, ...]
     annotations: tuple[SignalAnnotation, ...]
+
+    @model_validator(mode="after")
+    def validate_snapshot_local_invariants(self) -> SaveRecordingSnapshotRequest:
+        _validate_snapshot_contents(self.libraries, self.annotations)
+        return self

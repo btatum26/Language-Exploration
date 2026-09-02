@@ -159,7 +159,8 @@ Checks:
 - `sha256` is lowercase and matches exactly 64 hexadecimal characters.
 - `source_metadata` is a JSON object.
 
-The current Pydantic field may still be named `storage_key`; do not rewrite the domain model merely to match the database column. The future mapper can map it to `storage_uri`.
+The later application contract standardized this field as `storage_uri`; `logical_path` remains
+optional provenance or display information.
 
 The authoritative value is a logical URI of the form
 `registry-audio://assets/<audio-asset-uuid>`. Relative server-storage keys are not part of the

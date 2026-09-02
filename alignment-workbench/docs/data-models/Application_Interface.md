@@ -1,6 +1,6 @@
 # Application Interface
 
-Status: Proposed
+Status: Persistence interfaces implemented; interaction engine pending
 
 Scope: Snapshot interchange, save and read workflows, service boundaries, and editor behavior
 

@@ -15,7 +15,7 @@
   "audio_asset": {
     "id": "f24a602b-5c44-414a-8799-480ada11334d",
     "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-    "storage_key": "registry-audio://assets/0198f6c4-8f41-7b84-b8f8-a7dc278ef64d",
+    "storage_uri": "registry-audio://assets/0198f6c4-8f41-7b84-b8f8-a7dc278ef64d",
     "sample_rate_hz": 48000,
     "frame_count": 192000,
     "channels": 1

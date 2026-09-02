@@ -1,14 +1,15 @@
 # Alignment Workbench Persistence Architecture
 
-**Status:** Approved design baseline  
+**Status:** Implemented persistence baseline
 **Date:** 2026-08-30  
-**Current implementation phase:** Database foundation only
+**Current implementation phase:** Database foundation and model-facing persistence layer
 
 ## 1. Purpose
 
-This document defines the persistence architecture owned by `alignment-workbench`. It preserves
-the decisions used to build the PostgreSQL database without prematurely implementing repository,
-application-service, audio-transfer, or GUI integration work.
+This document defines the persistence architecture owned by `alignment-workbench`. The concrete
+repository and transaction behavior is documented in
+[SQLAlchemy Persistence Layer](SQLAlchemy_Persistence_Layer.md). Audio transfer, the future
+interaction engine, and GUI integration remain separate work.
 
 The database foundation must support:
 
@@ -130,7 +131,8 @@ not cross the application boundary. PostgreSQL enforces that the value is nonemp
 service validates the exact scheme and UUID form. The file must exist before an authoritative
 recording is committed.
 
-The current domain field named `storage_key` may map to `storage_uri` until it is deliberately renamed. The database should use the clearer `storage_uri` name.
+The domain and database both use `storage_uri`. It is the authoritative logical locator;
+`logical_path` is optional provenance or display information only.
 
 ### 5.2 `speakers`
 
@@ -347,38 +349,38 @@ Canonical history uses insert-only rows:
 
 Foreign keys for canonical data use `ON DELETE RESTRICT`. A future operational run-history subsystem may have explicit cleanup rules, but it is outside the first database foundation.
 
-The owner role performs DDL and migrations. Runtime privileges should eventually prevent the application role from updating or deleting immutable history. Role creation and environment-specific grants do not belong in portable Alembic revisions.
+The owner role performs DDL and migrations. Runtime privileges prevent the application role from updating or deleting immutable history. Role creation and environment-specific grants do not belong in portable Alembic revisions.
 
 ## 8. SQLAlchemy architecture
 
-The future package boundary is:
+The implemented package boundary is:
 
 ```text
-registry_aligner/
-    domain/
+alignment-workbench/
+    src/
         models.py
-    application/
-        services/
-    persistence/
-        repositories.py
-        sqlalchemy/
-            base.py
-            rows.py
-            session.py
-            mappers.py
-            library_repository.py
-            recording_repository.py
+        application/
+            persistence.py
+            read_models.py
+            errors.py
+        persistence/
+            sqlalchemy/
+                base.py
+                engine.py
+                rows.py
+                session.py
+                mappers.py
+                audio_asset_repository.py
+                speaker_repository.py
+                library_repository.py
+                recording_queries.py
+                recording_repository.py
+                unit_of_work.py
 ```
 
-The current database phase implements only:
-
-- `base.py`
-- `rows.py`
-- `session.py`
-- Alembic configuration and the clean baseline migration
-- database-focused tests
-
-It does not yet implement mappers, repositories, application services, audio retrieval, GUI integration, or recovery synchronization.
+The package implements bounded reads, centralized hydration, focused repositories, and a
+transaction-owning facade. Audio retrieval, GUI integration, the interaction engine, and recovery
+synchronization are still separate concerns.
 
 ### 8.1 Metadata
 
@@ -440,7 +442,7 @@ The future SQLAlchemy mapper may use Pydantic `model_construct()` only in one pr
 
 Full validation is still required for untrusted files, imported data, backups, API payloads, and audit operations. JSON Schema validators should be compiled and cached by immutable library-version hash. Unchanged annotations should not be revalidated on every save.
 
-## 10. Future read path
+## 10. Implemented read path
 
 Loading a current snapshot should use bounded queries instead of one row-multiplying join:
 
@@ -451,7 +453,7 @@ Loading a current snapshot should use bounded queries instead of one row-multipl
 5. Return the snapshot, including `audio_asset.storage_uri`, to the application service.
 6. Let the server-audio adapter resolve or materialize the audio independently.
 
-## 11. Future atomic save path
+## 11. Implemented atomic save path
 
 A future snapshot save is one PostgreSQL transaction:
 
@@ -506,12 +508,11 @@ PostgreSQL and the server filesystem cannot participate in one shared transactio
 
 The reverse ordering is not used because it could commit a recording whose audio file does not exist.
 
-## 14. Explicit exclusions from the database-foundation phase
+## 14. Current exclusions
 
-Do not implement any of the following yet:
+The persistence layer does not implement:
 
-- Application engine or use-case services.
-- Repository implementations or Pydantic hydration.
+- The interaction engine or editing use-case services.
 - GUI integration.
 - Audio upload, SFTP, download, caching, playback, or decoding.
 - Local recovery outbox runtime.
@@ -521,4 +522,5 @@ Do not implement any of the following yet:
 - Diff/event-sourced revision replay.
 - Operational run-history cleanup.
 
-The next phase establishes the database shape and verifies it against PostgreSQL. Later phases add repositories and engine workflows against this stable foundation.d
+The database shape and repositories are established. Later work connects the interaction engine
+and recovery workflow through these stable application protocols.

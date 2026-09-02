@@ -1,9 +1,10 @@
 # PostgreSQL Database Foundation
 
-The immutable recording-snapshot database is owned by `alignment-workbench`. This phase contains
-only typed SQLAlchemy rows, engine/session construction, Alembic migrations, and database tests.
-It does not contain repositories, snapshot mappers, transfer services, audio storage operations,
-or GUI database access.
+The immutable recording-snapshot database is owned by `alignment-workbench`. The foundation
+contains typed SQLAlchemy rows, engine/session construction, Alembic migrations, and database
+tests. The model-facing repositories and hydration layer built on this unchanged schema are
+documented in [SQLAlchemy Persistence Layer](SQLAlchemy_Persistence_Layer.md). Audio transfer,
+storage operations, and GUI database access remain outside the persistence package.
 
 ## Layout
 

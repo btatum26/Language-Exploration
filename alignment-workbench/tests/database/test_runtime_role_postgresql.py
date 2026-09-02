@@ -2,12 +2,28 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import Connection, Engine, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session, sessionmaker
+
+from models import (
+    AudioAsset,
+    CreateRecordingRequest,
+    Library,
+    LibraryEntry,
+    LibraryVersion,
+    PinnedLibraryVersion,
+    PointGeometry,
+    SaveRecordingSnapshotRequest,
+    SignalAnnotation,
+    Speaker,
+)
+from persistence.sqlalchemy.unit_of_work import SqlAlchemyPersistence
 
 pytestmark = pytest.mark.postgresql
 
@@ -283,3 +299,95 @@ def test_runtime_role_can_insert_snapshot_and_only_advance_head(
         "WHERE recording_revision_id = :revision AND annotation_id = :annotation",
         ids,
     )
+
+
+def test_persistence_facade_operates_under_runtime_role_permissions(
+    runtime_connection: Connection,
+) -> None:
+    factory = sessionmaker(
+        bind=runtime_connection,
+        class_=Session,
+        expire_on_commit=False,
+        autoflush=False,
+        join_transaction_mode="create_savepoint",
+    )
+    store = SqlAlchemyPersistence(factory)
+    token = uuid4()
+    speaker = store.create_speaker(
+        Speaker(
+            id=uuid4(),
+            external_key=f"facade-{token.hex}",
+            display_name="Runtime Facade Speaker",
+        )
+    )
+    library = store.create_library(
+        Library(
+            id=uuid4(),
+            namespace=f"runtime.facade.{token.hex}",
+            name="Runtime Facade Library",
+        )
+    )
+    version_id = uuid4()
+    version = store.publish_library_version(
+        LibraryVersion(
+            id=version_id,
+            library_id=library.id,
+            version_label="1.0.0",
+            content_sha256=version_id.hex * 2,
+            created_at=datetime.now(UTC),
+            entries=(
+                LibraryEntry(
+                    id=uuid4(),
+                    library_version_id=version_id,
+                    entry_key="event",
+                    display_name="Event",
+                    description="Runtime facade event",
+                    allowed_geometry_types=("point",),
+                ),
+            ),
+        )
+    )
+    asset_id = uuid4()
+    annotation = SignalAnnotation(
+        id=uuid4(),
+        concept_ref=f"{library.namespace}@{version.version_label}:event",
+        geometry=PointGeometry(start_sample=100),
+    )
+    request = CreateRecordingRequest(
+        recording_id=uuid4(),
+        audio_asset=AudioAsset(
+            id=asset_id,
+            sha256=asset_id.hex * 2,
+            storage_uri=f"registry-audio://assets/{asset_id}",
+            sample_rate_hz=16_000,
+            frame_count=16_000,
+            channels=1,
+        ),
+        name="Runtime Facade Recording",
+        default_speaker_ref=speaker.id,
+        language="it",
+        libraries=(
+            PinnedLibraryVersion(
+                namespace=library.namespace,
+                version=version.version_label,
+                content_sha256=version.content_sha256,
+            ),
+        ),
+        annotations=(annotation,),
+    )
+
+    first = store.create_recording(request)
+    second = store.save_snapshot(
+        SaveRecordingSnapshotRequest(
+            recording_id=request.recording_id,
+            expected_parent_revision_id=first.revision.id,
+            name="Runtime Facade Recording Revised",
+            default_speaker_ref=speaker.id,
+            language="it",
+            libraries=request.libraries,
+            annotations=request.annotations,
+        )
+    )
+
+    assert second.revision.number == 2
+    assert store.load_workspace(request.recording_id).snapshot == second

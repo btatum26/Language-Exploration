@@ -77,7 +77,7 @@ def test_engine_and_session_factory_follow_runtime_contract() -> None:
     engine = build_engine("postgresql+psycopg://user:secret@127.0.0.1:5433/example")
     try:
         assert engine.dialect.name == "postgresql"
-        assert engine.pool.size() == 2
+        assert engine.pool.size() == 5
         factory = build_session_factory(engine)
         assert factory.kw["expire_on_commit"] is False
         assert factory.kw["autoflush"] is False

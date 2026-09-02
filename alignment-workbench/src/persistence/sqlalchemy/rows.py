@@ -435,7 +435,7 @@ class AnnotationRow(Base):
     end_sample: Mapped[int | None] = mapped_column(BigInteger)
     min_frequency_hz: Mapped[float | None] = mapped_column(Float)
     max_frequency_hz: Mapped[float | None] = mapped_column(Float)
-    polygon_vertices: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    polygon_vertices: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB(none_as_null=True))
     attributes: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

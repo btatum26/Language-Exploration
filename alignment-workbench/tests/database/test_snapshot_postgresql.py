@@ -36,6 +36,21 @@ def _alembic_config() -> Config:
     return config
 
 
+def _drop_disposable_version_table(test_url: str) -> None:
+    table_name = (
+        "registry_align_snapshot_alembic_version"
+        if SCHEMA == "registry_align"
+        else f"{SCHEMA}_alembic_version"
+    )
+    cleanup_engine = create_engine(test_url)
+    try:
+        quoted_name = cleanup_engine.dialect.identifier_preparer.quote(table_name)
+        with cleanup_engine.begin() as connection:
+            connection.exec_driver_sql(f"DROP TABLE IF EXISTS public.{quoted_name}")
+    finally:
+        cleanup_engine.dispose()
+
+
 @pytest.fixture(scope="module")
 def database_engine() -> Iterator[Engine]:
     test_url = os.getenv("TEST_DATABASE_URL")
@@ -61,6 +76,7 @@ def database_engine() -> Iterator[Engine]:
         yield engine
         engine.dispose()
         command.downgrade(config, "base")
+        _drop_disposable_version_table(test_url)
     finally:
         if previous_admin is None:
             os.environ.pop("REGISTRY_ALIGN_DATABASE_ADMIN_URL", None)
