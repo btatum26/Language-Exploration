@@ -28,4 +28,5 @@ Rules:
 - A changed remote head becomes a conflict.
 - Malformed envelopes are quarantined.
 - `archive` preserves the file in an abandoned/archive area; it does not permanently delete it.
-- `retry_all` processes dependent operations in deterministic order and stops a recording's chain after its first conflict.
+- `retry_all` processes dependent operations in deterministic parent order and stops a recording's chain after its first conflict.
+- Recordings already represented in `conflicts/` are blocked at the start of every `retry_all` call, so pending children cannot create secondary conflicts on later runs.

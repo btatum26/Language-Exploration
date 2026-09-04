@@ -27,5 +27,9 @@ The contract tests cover:
 15. A changed remote head produces `SaveConflict` without losing local edits.
 16. External annotations can be added without an analysis-specific interface.
 17. No ordinary in-memory edit performs database I/O.
+18. A second save stays queued while the session is pending, including after connectivity returns.
+19. A restarted application refuses to open older PostgreSQL state while recovery is active.
+20. Existing conflicts continue to block pending children across repeated `retry_all` calls.
+21. Concept, compiled JSON Schema, and annotation-ID indexes are reused across ordinary edits.
 
 Implemented lower-level coverage is documented in [Data model and persistence testing](../../testing/Data_Model_and_Persistence_Testing.md).

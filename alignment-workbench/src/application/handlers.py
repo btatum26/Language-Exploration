@@ -23,6 +23,7 @@ from application.errors import (
     InvalidRecoveryEnvelopeError,
     LibraryNotFoundError,
     LibraryVersionNotFoundError,
+    PendingRecoveryOperationError,
     PersistenceError,
     RecoveryStorageError,
     WorkbenchError,
@@ -175,7 +176,7 @@ class RecordingHandler:
             versions,
             self._library_catalog,
         )
-        validate_annotations(
+        validation_context = validate_annotations(
             command.annotations,
             audio_asset=audio_asset,
             bindings=bindings,
@@ -224,11 +225,27 @@ class RecordingHandler:
             recovery_outbox=self._recovery_outbox,
             library_catalog=self._library_catalog,
             resolve_versions=self._libraries.resolve_pins,
+            validation_context=validation_context,
             sync_state=sync_state,
             pending_operation_id=pending_operation_id,
         )
 
     def open(self, recording_id: UUID) -> RecordingEditSession:
+        active = next(
+            (
+                envelope
+                for envelope in (
+                    self._recovery_outbox.list_pending() + self._recovery_outbox.list_conflicts()
+                )
+                if envelope.recording_id == recording_id
+            ),
+            None,
+        )
+        if active is not None:
+            raise PendingRecoveryOperationError(
+                f"recovery operation {active.operation_id} must be resolved before opening "
+                f"recording {recording_id}"
+            )
         workspace = self._persistence.load_workspace(recording_id)
         audio = self._audio_storage.resolve(workspace.snapshot.audio_asset)
         return RecordingEditSession.from_workspace(
@@ -344,7 +361,9 @@ class RecoveryHandler:
 
     def retry_all(self) -> tuple[RecoveryResult, ...]:
         results: list[RecoveryResult] = []
-        blocked_recordings: set[UUID] = set()
+        blocked_recordings = {
+            envelope.recording_id for envelope in self._recovery_outbox.list_conflicts()
+        }
         remaining = list(self._recovery_outbox.list_pending())
         while remaining:
             pending_revision_ids = {(item.recording_id, item.revision_id) for item in remaining}
@@ -362,6 +381,10 @@ class RecoveryHandler:
                 None,
             )
             if ready_index is None:
+                if any(item.recording_id not in blocked_recordings for item in remaining):
+                    raise InvalidRecoveryEnvelopeError(
+                        "pending recovery operations contain a dependency cycle"
+                    )
                 break
             envelope = remaining.pop(ready_index)
             result = self.retry(envelope.operation_id)

@@ -84,7 +84,10 @@ class LocalAudioStorage:
             raise AudioUnavailableError(f"could not ingest audio source {source}") from exc
         finally:
             if temporary_path is not None:
-                temporary_path.unlink(missing_ok=True)
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
         return AudioAsset(
             id=asset_id,
@@ -116,17 +119,25 @@ class LocalAudioStorage:
 
     def verify(self, audio_asset: AudioAsset) -> AudioVerificationResult:
         target = self._target_for_asset(audio_asset)
-        if not target.is_file():
+        try:
+            resolved = target.resolve(strict=True)
+        except FileNotFoundError:
             return AudioVerificationResult(
                 asset=audio_asset,
                 local_path=None,
                 exists=False,
                 hash_matches=False,
             )
-        actual_sha256 = self._sha256(target)
+        except OSError as exc:
+            raise AudioUnavailableError(f"could not resolve stored audio {audio_asset.id}") from exc
+        if not resolved.is_relative_to(self._assets_root) or not resolved.is_file():
+            raise AudioIntegrityError(
+                f"audio asset {audio_asset.id} resolves outside the configured storage root"
+            )
+        actual_sha256 = self._sha256(resolved)
         return AudioVerificationResult(
             asset=audio_asset,
-            local_path=target.resolve(),
+            local_path=resolved,
             exists=True,
             hash_matches=actual_sha256 == audio_asset.sha256,
             actual_sha256=actual_sha256,

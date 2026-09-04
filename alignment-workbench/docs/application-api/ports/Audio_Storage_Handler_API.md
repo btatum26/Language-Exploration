@@ -28,7 +28,7 @@ Ingestion:
 3. Extracts the authoritative sample rate, frame count, channel count, media type, extension, and codec.
 4. Writes a temporary file below the configured audio root.
 5. Flushes the completed file.
-6. Atomically renames it to the immutable final location.
+6. Atomically publishes it without overwriting an existing immutable target.
 7. Returns an `AudioAsset` with a logical URI.
 
 ## Resolution
@@ -44,6 +44,7 @@ Resolution:
 Full hashing belongs to ingestion and explicit `verify` or maintenance audits.
 
 `LocalAudioStorage` is the concrete implementation. The current decoder boundary accepts uncompressed PCM WAV input and reports `UnsupportedAudioError` for other formats or compressed WAV data.
+Both resolution and verification reject logical URIs or filesystem links that escape the configured storage root.
 
 ## Immutability
 

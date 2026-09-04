@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from jsonschema import exceptions as jsonschema_exceptions
+from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
 
 from application.errors import (
@@ -47,6 +48,7 @@ class LibraryCatalog:
     def __init__(self) -> None:
         self._libraries: dict[UUID, Library] = {}
         self._version_namespaces: dict[UUID, str] = {}
+        self._versions_by_id: dict[UUID, LibraryVersion] = {}
         self._versions: dict[tuple[str, str], LibraryVersion] = {}
 
     def remember_library(self, library: Library) -> None:
@@ -58,7 +60,13 @@ class LibraryCatalog:
             raise PersistenceIntegrityError(
                 f"library version {version.id} was associated with multiple namespaces"
             )
+        existing_version = self._versions_by_id.get(version.id)
+        if existing_version is not None and existing_version != version:
+            raise PersistenceIntegrityError(
+                f"library version {version.id} was loaded with different content"
+            )
         self._version_namespaces[version.id] = namespace
+        self._versions_by_id[version.id] = version
         self._versions[(namespace, version.version_label)] = version
 
     def namespace_for(self, version: LibraryVersion) -> str:
@@ -66,6 +74,10 @@ class LibraryCatalog:
         if namespace is None:
             raise LibraryVersionNotFoundError(
                 "library version namespace is unknown; obtain the version through LibraryHandler"
+            )
+        if self._versions_by_id[version.id] != version:
+            raise LibraryVersionNotFoundError(
+                "library version differs from the value obtained through LibraryHandler"
             )
         return namespace
 
@@ -96,70 +108,101 @@ def bind_library_versions(
 
 def concept_index(
     bindings: tuple[LibraryBinding, ...],
-) -> dict[str, LibraryEntry]:
-    entries: dict[str, LibraryEntry] = {}
+) -> dict[ConceptRef, LibraryEntry]:
+    entries: dict[ConceptRef, LibraryEntry] = {}
     for binding in bindings:
         for entry in binding.version.entries:
-            reference = f"{binding.pin.namespace}@{binding.pin.version}:{entry.entry_key}"
+            reference = ConceptRef(
+                f"{binding.pin.namespace}@{binding.pin.version}:{entry.entry_key}"
+            )
             if reference in entries:
                 raise PersistenceIntegrityError(f"duplicate concept reference {reference}")
             entries[reference] = entry
     return entries
 
 
+class AnnotationValidationContext:
+    """Concept and compiled-schema caches for one exact pinned-library set."""
+
+    def __init__(self, bindings: tuple[LibraryBinding, ...]) -> None:
+        self.bindings = bindings
+        self._versions = frozenset(
+            (binding.pin.namespace, binding.pin.version) for binding in bindings
+        )
+        self._concepts = concept_index(bindings)
+        self._entries = tuple(entry for binding in bindings for entry in binding.version.entries)
+        self._attribute_validators: dict[UUID, Validator] = {}
+        for entry in self._entries:
+            if entry.id in self._attribute_validators:
+                raise PersistenceIntegrityError(
+                    f"library entry ID {entry.id} appears more than once in pinned versions"
+                )
+            schema = entry.model_dump(mode="json")["attribute_schema"]
+            validator_type = validator_for(schema)
+            try:
+                validator_type.check_schema(schema)
+            except jsonschema_exceptions.SchemaError as exc:
+                raise PersistenceIntegrityError(
+                    f"concept entry {entry.id} has an invalid attribute schema"
+                ) from exc
+            self._attribute_validators[entry.id] = validator_type(schema)
+
+    @property
+    def entries(self) -> tuple[LibraryEntry, ...]:
+        return self._entries
+
+    def resolve(self, reference: ConceptRef) -> LibraryEntry:
+        version_key = (reference.namespace, reference.version)
+        if version_key not in self._versions:
+            raise ConceptNotPinnedError(
+                f"library version {reference.namespace}@{reference.version} is not pinned"
+            )
+        try:
+            return self._concepts[reference]
+        except KeyError as exc:
+            raise ConceptNotFoundError(f"concept {reference} was not found") from exc
+
+    def validate(
+        self,
+        annotation: SignalAnnotation,
+        *,
+        audio_asset: AudioAsset,
+    ) -> None:
+        entry = self.resolve(annotation.concept_ref)
+        if annotation.geometry.type not in entry.allowed_geometry_types:
+            raise GeometryNotAllowedError(
+                f"concept {annotation.concept_ref} does not allow {annotation.geometry.type}"
+            )
+
+        geometry = annotation.geometry
+        if isinstance(geometry, PointGeometry):
+            if geometry.start_sample >= audio_asset.frame_count:
+                raise GeometryOutOfBoundsError("point geometry lies beyond the audio frame count")
+        elif geometry.end_sample > audio_asset.frame_count:
+            raise GeometryOutOfBoundsError("annotation geometry lies beyond the audio frame count")
+        if isinstance(geometry, (TimeFrequencyBoxGeometry, TimeFrequencyPolygonGeometry)):
+            nyquist_hz = audio_asset.sample_rate_hz / 2
+            if geometry.max_frequency_hz > nyquist_hz:
+                raise GeometryOutOfBoundsError(
+                    f"geometry exceeds the audio Nyquist frequency of {nyquist_hz:g} Hz"
+                )
+
+        attributes = annotation.model_dump(mode="json")["attributes"]
+        try:
+            self._attribute_validators[entry.id].validate(attributes)
+        except jsonschema_exceptions.ValidationError as exc:
+            raise InvalidAnnotationAttributesError(
+                f"attributes do not satisfy concept {annotation.concept_ref}: {exc.message}"
+            ) from exc
+
+
 def validate_annotation(
     annotation: SignalAnnotation,
     *,
     audio_asset: AudioAsset,
-    bindings: tuple[LibraryBinding, ...],
+    context: AnnotationValidationContext,
 ) -> None:
-    versions = {(binding.pin.namespace, binding.pin.version) for binding in bindings}
-    version_key = (
-        annotation.concept_ref.namespace,
-        annotation.concept_ref.version,
-    )
-    if version_key not in versions:
-        raise ConceptNotPinnedError(
-            f"library version {version_key[0]}@{version_key[1]} is not pinned"
-        )
-
-    entries = concept_index(bindings)
-    try:
-        entry = entries[str(annotation.concept_ref)]
-    except KeyError as exc:
-        raise ConceptNotFoundError(f"concept {annotation.concept_ref} was not found") from exc
-    if annotation.geometry.type not in entry.allowed_geometry_types:
-        raise GeometryNotAllowedError(
-            f"concept {annotation.concept_ref} does not allow {annotation.geometry.type}"
-        )
-
-    geometry = annotation.geometry
-    if isinstance(geometry, PointGeometry):
-        if geometry.start_sample >= audio_asset.frame_count:
-            raise GeometryOutOfBoundsError("point geometry lies beyond the audio frame count")
-    elif geometry.end_sample > audio_asset.frame_count:
-        raise GeometryOutOfBoundsError("annotation geometry lies beyond the audio frame count")
-    if isinstance(geometry, (TimeFrequencyBoxGeometry, TimeFrequencyPolygonGeometry)):
-        nyquist_hz = audio_asset.sample_rate_hz / 2
-        if geometry.max_frequency_hz > nyquist_hz:
-            raise GeometryOutOfBoundsError(
-                f"geometry exceeds the audio Nyquist frequency of {nyquist_hz:g} Hz"
-            )
-
-    schema = entry.model_dump(mode="json")["attribute_schema"]
-    attributes = annotation.model_dump(mode="json")["attributes"]
-    validator_type = validator_for(schema)
-    try:
-        validator_type.check_schema(schema)
-        validator_type(schema).validate(attributes)
-    except jsonschema_exceptions.SchemaError as exc:
-        raise PersistenceIntegrityError(
-            f"concept {annotation.concept_ref} has an invalid attribute schema"
-        ) from exc
-    except jsonschema_exceptions.ValidationError as exc:
-        raise InvalidAnnotationAttributesError(
-            f"attributes do not satisfy concept {annotation.concept_ref}: {exc.message}"
-        ) from exc
+    context.validate(annotation, audio_asset=audio_asset)
 
 
 def validate_annotations(
@@ -167,13 +210,19 @@ def validate_annotations(
     *,
     audio_asset: AudioAsset,
     bindings: tuple[LibraryBinding, ...],
-) -> None:
+) -> AnnotationValidationContext:
+    context = AnnotationValidationContext(bindings)
     seen: set[UUID] = set()
     for annotation in annotations:
         if annotation.id in seen:
             raise DuplicateAnnotationError(f"annotation {annotation.id} is duplicated")
         seen.add(annotation.id)
-        validate_annotation(annotation, audio_asset=audio_asset, bindings=bindings)
+        validate_annotation(
+            annotation,
+            audio_asset=audio_asset,
+            context=context,
+        )
+    return context
 
 
 def library_content_sha256(version: LibraryVersion) -> str:
@@ -211,14 +260,6 @@ def pin_for_version(version: LibraryVersion, namespace: str) -> PinnedLibraryVer
 
 def resolve_concept(
     reference: ConceptRef,
-    bindings: tuple[LibraryBinding, ...],
+    context: AnnotationValidationContext,
 ) -> LibraryEntry:
-    versions = {(binding.pin.namespace, binding.pin.version) for binding in bindings}
-    if (reference.namespace, reference.version) not in versions:
-        raise ConceptNotPinnedError(
-            f"library version {reference.namespace}@{reference.version} is not pinned"
-        )
-    try:
-        return concept_index(bindings)[str(reference)]
-    except KeyError as exc:
-        raise ConceptNotFoundError(f"concept {reference} was not found") from exc
+    return context.resolve(reference)

@@ -44,7 +44,7 @@ Rules:
 - Entry order is preserved.
 - Entry keys are unique within a version.
 - Version labels and content hashes are unique within a library.
-- `publish_version` verifies or computes the deterministic content hash according to the chosen library serialization contract.
+- `publish_version` verifies the deterministic content hash. Callers may use the exported `library_content_sha256` helper while constructing a version.
 - No update or delete methods are exposed in the initial API.
 
 The handler may use the existing `LibraryStore` persistence protocol. `RecordingEditSession.pin_library_version` receives complete published versions from this handler.

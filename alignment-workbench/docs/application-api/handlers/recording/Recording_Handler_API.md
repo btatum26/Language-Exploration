@@ -61,10 +61,14 @@ If PostgreSQL rejects the recording for a semantic or integrity reason, creation
 
 Opening a recording:
 
-1. Loads the current `RecordingWorkspace` from persistence.
-2. Resolves the audio URI through the audio-storage handler.
-3. Builds an in-memory edit session.
-4. Closes the database transaction before returning.
+1. Checks the recovery outbox for a pending or conflicted operation for the recording.
+2. Raises `PendingRecoveryOperationError` without loading PostgreSQL when local recovery state exists.
+3. Loads the current `RecordingWorkspace` from persistence.
+4. Resolves the audio URI through the audio-storage handler.
+5. Builds an in-memory edit session.
+6. Closes the database transaction before returning.
+
+This first implementation does not reconstruct a session from recovery files after a restart. The recovery operation must be retried or archived before the recording can be opened.
 
 ## Revision access
 

@@ -74,7 +74,7 @@ jobs:
       - working-directory: spectrogram-playground
         run: uv run python -m compileall -q spectrogram_playground
       - working-directory: alignment-workbench
-        run: uv sync --extra dev
+        run: uv sync --group dev
       - working-directory: alignment-workbench
         run: uv run pytest
       - working-directory: alignment-workbench

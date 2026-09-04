@@ -110,6 +110,7 @@ Rules:
 - Replacement preserves the target identity unless the caller explicitly supplies the same ID in the replacement.
 - Annotation order is stable. Adding appends; replacement keeps the existing position; removal closes the position without changing the relative order of remaining annotations.
 - Mutations validate only the changed annotation or batch plus required aggregate-local uniqueness checks.
+- Annotation lookup uses a session-owned UUID index that is updated with each annotation mutation and retained with undo/redo state.
 
 ## Library use inside the session
 
@@ -127,7 +128,7 @@ def unpin_library_version(
 ) -> None: ...
 ```
 
-The session builds an in-memory concept index from its pinned versions.
+The session builds an in-memory concept index and compiles one attribute validator per library-entry UUID. These caches are reused for annotation mutations and concept resolution, and are rebuilt only when the pinned library set changes.
 
 Creating, adding, or replacing an annotation requires:
 
@@ -178,7 +179,7 @@ def reload(self) -> None: ...
 def discard_unsaved_changes(self) -> None: ...
 ```
 
-- `reload` fetches the current authoritative head, replaces the session contents, rebuilds concept and annotation indexes, clears local edit history, and sets `sync_state` to `SYNCED`.
+- `reload` fetches the current authoritative head, replaces the session contents, updates the annotation index, rebuilds library-derived caches only if the pins changed, clears local edit history, and sets `sync_state` to `SYNCED`.
 - `discard_unsaved_changes` returns to the most recently captured local save checkpoint without performing database I/O.
 - Neither method may silently discard a pending recovery operation. A pending or conflicted operation requires an explicit recovery decision.
 
@@ -198,7 +199,7 @@ Saving:
 1. Creates a stable new revision UUID before any I/O.
 2. Builds a complete `SaveRecordingSnapshotRequest` from current session state.
 3. Writes the recovery envelope atomically.
-4. Attempts the idempotent persistence operation.
+4. Attempts the idempotent persistence operation only when the session is synchronized.
 5. Returns `Saved`, `Queued`, or `SaveConflict`.
 
 On `Saved`:
@@ -215,12 +216,15 @@ On `Queued`:
 - `dirty` becomes false relative to that local checkpoint;
 - `sync_state` becomes `PENDING`;
 - PostgreSQL is not reported as updated.
+- additional saves remain queued as children of the newest local revision, even if connectivity has returned;
+- `RecoveryHandler.retry_all()` applies the dependent chain in parent order.
 
 On `SaveConflict`:
 
 - local contents remain unchanged;
 - `sync_state` becomes `CONFLICT`;
 - no automatic merge occurs.
+- further saves raise `PendingRecoveryOperationError` until the conflict is archived and the session is reloaded.
 
 ## External analysis boundary
 

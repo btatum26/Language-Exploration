@@ -172,7 +172,10 @@ class FileRecoveryOutbox:
             ) from exc
         finally:
             if temporary_path is not None:
-                temporary_path.unlink(missing_ok=True)
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     @staticmethod
     def _move(source: Path, destination: Path) -> None:

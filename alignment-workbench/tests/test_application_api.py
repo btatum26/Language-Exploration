@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+import application.validation as validation_module
 from application import (
     AnnotationQuery,
     AudioUnavailableError,
@@ -617,6 +618,8 @@ def test_stale_save_becomes_explicit_conflict_until_archived(
     assert len(listed) == 1
     assert isinstance(api.recovery.retry(conflict.operation_id), RecoveryConflict)  # type: ignore[attr-defined]
     with pytest.raises(PendingRecoveryOperationError):
+        second.save()
+    with pytest.raises(PendingRecoveryOperationError):
         second.reload()
     api.recovery.archive(conflict.operation_id)  # type: ignore[attr-defined]
     second.reload()
@@ -739,11 +742,13 @@ def test_retry_all_applies_dependent_queued_saves_in_parent_order(
     store.offline = True
     session.set_name("First queued")  # type: ignore[attr-defined]
     first = session.save()  # type: ignore[attr-defined]
+    save_attempts_before_child = store.calls.count("save_snapshot")
+    store.offline = False
     session.set_name("Second queued")  # type: ignore[attr-defined]
     second = session.save()  # type: ignore[attr-defined]
     assert isinstance(first, Queued)
     assert isinstance(second, Queued)
-    store.offline = False
+    assert store.calls.count("save_snapshot") == save_attempts_before_child
 
     results = api.recovery.retry_all()  # type: ignore[attr-defined]
 
@@ -753,3 +758,113 @@ def test_retry_all_applies_dependent_queued_saves_in_parent_order(
     ]
     assert all(isinstance(result, RecoveryApplied) for result in results)
     assert store.heads[session.recording_id] == second.revision_id  # type: ignore[attr-defined]
+
+
+def test_restart_refuses_to_open_a_recording_with_pending_recovery(
+    application_system: tuple[object, MemoryPersistenceStore, Path, Path],
+) -> None:
+    api, store, source, recovery_root = application_system
+    session = create_recording(api, source)
+    store.offline = True
+    session.set_name("Local pending")  # type: ignore[attr-defined]
+    queued = session.save()  # type: ignore[attr-defined]
+    assert isinstance(queued, Queued)
+    store.offline = False
+    restarted = create_workbench(
+        persistence=store,
+        audio_storage=LocalAudioStorage(session.audio.local_path.parents[1]),  # type: ignore[attr-defined]
+        recovery_outbox=FileRecoveryOutbox(recovery_root),
+    )
+    workspace_loads = store.calls.count("load_workspace")
+
+    with pytest.raises(PendingRecoveryOperationError):
+        restarted.recordings.open(session.recording_id)  # type: ignore[attr-defined]
+
+    assert store.calls.count("load_workspace") == workspace_loads
+    assert isinstance(restarted.recovery.retry(queued.operation_id), RecoveryApplied)
+    reopened = restarted.recordings.open(session.recording_id)  # type: ignore[attr-defined]
+    assert reopened.name == "Local pending"
+
+
+def test_retry_all_keeps_children_blocked_by_an_existing_conflict(
+    application_system: tuple[object, MemoryPersistenceStore, Path, Path],
+) -> None:
+    api, store, source, _ = application_system
+    session = create_recording(api, source)
+    recording_id = session.recording_id  # type: ignore[attr-defined]
+    original_head = session.base_revision_id  # type: ignore[attr-defined]
+    store.offline = True
+    session.set_name("Queued parent")  # type: ignore[attr-defined]
+    parent = session.save()  # type: ignore[attr-defined]
+    session.set_name("Queued child")  # type: ignore[attr-defined]
+    child = session.save()  # type: ignore[attr-defined]
+    assert isinstance(parent, Queued)
+    assert isinstance(child, Queued)
+    store.offline = False
+    store.save_snapshot(
+        SaveRecordingSnapshotRequest(
+            recording_id=recording_id,
+            expected_parent_revision_id=original_head,
+            name="Remote winner",
+            language="en",
+            libraries=(),
+            annotations=(),
+        )
+    )
+
+    first_run = api.recovery.retry_all()  # type: ignore[attr-defined]
+
+    assert len(first_run) == 1
+    assert isinstance(first_run[0], RecoveryConflict)
+    assert [item.operation_id for item in api.recovery.list_pending()] == [  # type: ignore[attr-defined]
+        child.operation_id
+    ]
+    save_attempts = store.calls.count("save_snapshot")
+    assert api.recovery.retry_all() == ()  # type: ignore[attr-defined]
+    assert store.calls.count("save_snapshot") == save_attempts
+
+
+def test_session_reuses_validation_and_annotation_lookup_caches(
+    application_system: tuple[object, MemoryPersistenceStore, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api, _, source, _ = application_system
+    version, pin = publish_test_library(api)
+    concept_index_calls = 0
+    validator_for_calls = 0
+    original_concept_index = validation_module.concept_index
+    original_validator_for = validation_module.validator_for
+
+    def counting_concept_index(bindings: object) -> object:
+        nonlocal concept_index_calls
+        concept_index_calls += 1
+        return original_concept_index(bindings)  # type: ignore[arg-type]
+
+    def counting_validator_for(schema: object) -> object:
+        nonlocal validator_for_calls
+        validator_for_calls += 1
+        return original_validator_for(schema)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(validation_module, "concept_index", counting_concept_index)
+    monkeypatch.setattr(validation_module, "validator_for", counting_validator_for)
+    session = create_recording(api, source, libraries=(pin,))
+    concept = ConceptRef("le.test@1.0.0:event")
+    first = annotation(concept, start=10, end=20)
+    second = annotation(concept, start=30, end=40)
+
+    session.add_annotations((first, second))  # type: ignore[attr-defined]
+    assert session.resolve_concept(concept).entry_key == "event"  # type: ignore[attr-defined]
+    assert session.get_annotation(second.id) == second  # type: ignore[attr-defined]
+    assert concept_index_calls == 1
+    assert validator_for_calls == 1
+    assert session._state.annotations_by_id == {  # type: ignore[attr-defined]
+        first.id: first,
+        second.id: second,
+    }
+
+    session.remove_annotation(first.id)  # type: ignore[attr-defined]
+    session.remove_annotation(second.id)  # type: ignore[attr-defined]
+    session.unpin_library_version("le.test", "1.0.0")  # type: ignore[attr-defined]
+    session.pin_library_version(version)  # type: ignore[attr-defined]
+    assert concept_index_calls == 3
+    assert validator_for_calls == 2

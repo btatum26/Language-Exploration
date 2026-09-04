@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import MappingProxyType
 from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter
@@ -31,19 +32,19 @@ from application.errors import (
     LibraryVersionNotFoundError,
     PendingRecoveryOperationError,
     PersistenceError,
+    PersistenceIntegrityError,
     RecoveryStorageError,
     WorkbenchError,
 )
 from application.persistence import PersistenceStore
 from application.read_models import RecordingRevisionSummary, RecordingWorkspace
 from application.validation import (
+    AnnotationValidationContext,
     LibraryBinding,
     LibraryCatalog,
     bind_library_versions,
     pin_for_version,
     require_library_content_hash,
-    resolve_concept,
-    validate_annotation,
 )
 from models import (
     AnnotatedRecordingSnapshot,
@@ -69,6 +70,11 @@ class _EditableState:
     default_speaker_ref: UUID | None
     bindings: tuple[LibraryBinding, ...]
     annotations: tuple[SignalAnnotation, ...]
+    validation: AnnotationValidationContext = field(compare=False, repr=False)
+    annotations_by_id: Mapping[UUID, SignalAnnotation] = field(
+        compare=False,
+        repr=False,
+    )
 
 
 class RecordingEditSession:
@@ -88,6 +94,7 @@ class RecordingEditSession:
             [tuple[PinnedLibraryVersion, ...]],
             tuple[LibraryVersion, ...],
         ],
+        validation_context: AnnotationValidationContext | None = None,
         sync_state: SyncState = SyncState.SYNCED,
         pending_operation_id: UUID | None = None,
     ) -> None:
@@ -101,7 +108,11 @@ class RecordingEditSession:
         self._recovery_outbox = recovery_outbox
         self._library_catalog = library_catalog
         self._resolve_versions = resolve_versions
-        self._state = self._state_from(snapshot, bindings)
+        self._state = self._state_from(
+            snapshot,
+            bindings,
+            validation_context=validation_context,
+        )
         self._checkpoint = self._state
         self._undo: list[_EditableState] = []
         self._redo: list[_EditableState] = []
@@ -128,6 +139,7 @@ class RecordingEditSession:
             workspace.library_versions,
             library_catalog,
         )
+        validation_context = AnnotationValidationContext(bindings)
         return cls(
             snapshot=workspace.snapshot,
             audio=audio,
@@ -137,6 +149,7 @@ class RecordingEditSession:
             recovery_outbox=recovery_outbox,
             library_catalog=library_catalog,
             resolve_versions=resolve_versions,
+            validation_context=validation_context,
         )
 
     @property
@@ -196,6 +209,8 @@ class RecordingEditSession:
                 default_speaker_ref=self.default_speaker_ref,
                 bindings=self._state.bindings,
                 annotations=self.annotations,
+                validation=self._state.validation,
+                annotations_by_id=self._state.annotations_by_id,
             )
         )
 
@@ -208,6 +223,8 @@ class RecordingEditSession:
                 default_speaker_ref=self.default_speaker_ref,
                 bindings=self._state.bindings,
                 annotations=self.annotations,
+                validation=self._state.validation,
+                annotations_by_id=self._state.annotations_by_id,
             )
         )
 
@@ -219,6 +236,8 @@ class RecordingEditSession:
                 default_speaker_ref=speaker_id,
                 bindings=self._state.bindings,
                 annotations=self.annotations,
+                validation=self._state.validation,
+                annotations_by_id=self._state.annotations_by_id,
             )
         )
 
@@ -252,20 +271,20 @@ class RecordingEditSession:
         annotations: Iterable[SignalAnnotation],
     ) -> tuple[SignalAnnotation, ...]:
         additions = tuple(annotations)
-        existing_ids = {annotation.id for annotation in self.annotations}
         addition_ids: set[UUID] = set()
         for annotation in additions:
-            if annotation.id in existing_ids or annotation.id in addition_ids:
+            if annotation.id in self._state.annotations_by_id or annotation.id in addition_ids:
                 raise DuplicateAnnotationError(
                     f"annotation {annotation.id} already exists in the edit session"
                 )
             addition_ids.add(annotation.id)
-            validate_annotation(
+            self._state.validation.validate(
                 annotation,
                 audio_asset=self.audio.asset,
-                bindings=self._state.bindings,
             )
         if additions:
+            annotations_by_id = dict(self._state.annotations_by_id)
+            annotations_by_id.update((annotation.id, annotation) for annotation in additions)
             self._mutate(
                 _EditableState(
                     name=self.name,
@@ -273,15 +292,17 @@ class RecordingEditSession:
                     default_speaker_ref=self.default_speaker_ref,
                     bindings=self._state.bindings,
                     annotations=self.annotations + additions,
+                    validation=self._state.validation,
+                    annotations_by_id=MappingProxyType(annotations_by_id),
                 )
             )
         return additions
 
     def get_annotation(self, annotation_id: UUID) -> SignalAnnotation:
-        for annotation in self.annotations:
-            if annotation.id == annotation_id:
-                return annotation
-        raise AnnotationNotFoundError(f"annotation {annotation_id} was not found")
+        try:
+            return self._state.annotations_by_id[annotation_id]
+        except KeyError as exc:
+            raise AnnotationNotFoundError(f"annotation {annotation_id} was not found") from exc
 
     def replace_annotation(
         self,
@@ -290,17 +311,19 @@ class RecordingEditSession:
     ) -> SignalAnnotation:
         if replacement.id != annotation_id:
             raise WorkbenchError("replacement annotation must preserve the target annotation ID")
-        validate_annotation(
+        current = self.get_annotation(annotation_id)
+        if current == replacement:
+            return current
+        self._state.validation.validate(
             replacement,
             audio_asset=self.audio.asset,
-            bindings=self._state.bindings,
         )
         annotations = list(self.annotations)
         for index, annotation in enumerate(annotations):
             if annotation.id == annotation_id:
-                if annotation == replacement:
-                    return annotation
                 annotations[index] = replacement
+                annotations_by_id = dict(self._state.annotations_by_id)
+                annotations_by_id[annotation_id] = replacement
                 self._mutate(
                     _EditableState(
                         name=self.name,
@@ -308,16 +331,21 @@ class RecordingEditSession:
                         default_speaker_ref=self.default_speaker_ref,
                         bindings=self._state.bindings,
                         annotations=tuple(annotations),
+                        validation=self._state.validation,
+                        annotations_by_id=MappingProxyType(annotations_by_id),
                     )
                 )
                 return replacement
-        raise AnnotationNotFoundError(f"annotation {annotation_id} was not found")
+        raise PersistenceIntegrityError("annotation index and ordered annotations diverged")
 
     def remove_annotation(self, annotation_id: UUID) -> SignalAnnotation:
+        removed = self.get_annotation(annotation_id)
         annotations = list(self.annotations)
         for index, annotation in enumerate(annotations):
             if annotation.id == annotation_id:
                 del annotations[index]
+                annotations_by_id = dict(self._state.annotations_by_id)
+                del annotations_by_id[annotation_id]
                 self._mutate(
                     _EditableState(
                         name=self.name,
@@ -325,10 +353,12 @@ class RecordingEditSession:
                         default_speaker_ref=self.default_speaker_ref,
                         bindings=self._state.bindings,
                         annotations=tuple(annotations),
+                        validation=self._state.validation,
+                        annotations_by_id=MappingProxyType(annotations_by_id),
                     )
                 )
-                return annotation
-        raise AnnotationNotFoundError(f"annotation {annotation_id} was not found")
+                return removed
+        raise PersistenceIntegrityError("annotation index and ordered annotations diverged")
 
     def find_annotations(self, query: AnnotationQuery) -> tuple[SignalAnnotation, ...]:
         return tuple(
@@ -336,10 +366,10 @@ class RecordingEditSession:
         )
 
     def list_available_concepts(self) -> tuple[LibraryEntry, ...]:
-        return tuple(entry for binding in self._state.bindings for entry in binding.version.entries)
+        return self._state.validation.entries
 
     def resolve_concept(self, concept_ref: ConceptRef) -> LibraryEntry:
-        return resolve_concept(concept_ref, self._state.bindings)
+        return self._state.validation.resolve(concept_ref)
 
     def pin_library_version(self, version: LibraryVersion) -> None:
         namespace = self._library_catalog.namespace_for(version)
@@ -352,13 +382,16 @@ class RecordingEditSession:
                 raise WorkbenchError(
                     f"{namespace}@{version.version_label} is already pinned with different content"
                 )
+        bindings = self._state.bindings + (LibraryBinding(pin=pin, version=version),)
         self._mutate(
             _EditableState(
                 name=self.name,
                 language=self.language,
                 default_speaker_ref=self.default_speaker_ref,
-                bindings=self._state.bindings + (LibraryBinding(pin=pin, version=version),),
+                bindings=bindings,
                 annotations=self.annotations,
+                validation=AnnotationValidationContext(bindings),
+                annotations_by_id=self._state.annotations_by_id,
             )
         )
 
@@ -385,13 +418,16 @@ class RecordingEditSession:
             )
         bindings = list(self._state.bindings)
         del bindings[index]
+        updated_bindings = tuple(bindings)
         self._mutate(
             _EditableState(
                 name=self.name,
                 language=self.language,
                 default_speaker_ref=self.default_speaker_ref,
-                bindings=tuple(bindings),
+                bindings=updated_bindings,
                 annotations=self.annotations,
+                validation=AnnotationValidationContext(updated_bindings),
+                annotations_by_id=self._state.annotations_by_id,
             )
         )
 
@@ -428,7 +464,13 @@ class RecordingEditSession:
             versions,
             self._library_catalog,
         )
-        self._mutate(self._state_from(snapshot, bindings))
+        self._mutate(
+            self._state_from(
+                snapshot,
+                bindings,
+                validation_context=self._validation_for(bindings),
+            )
+        )
 
     def reload(self) -> None:
         self._require_recovery_decision()
@@ -441,7 +483,11 @@ class RecordingEditSession:
         )
         self._audio = audio
         self._base_revision_id = workspace.snapshot.revision.id
-        self._state = self._state_from(workspace.snapshot, bindings)
+        self._state = self._state_from(
+            workspace.snapshot,
+            bindings,
+            validation_context=self._validation_for(bindings),
+        )
         self._checkpoint = self._state
         self.clear_edit_history()
         self._sync_state = SyncState.SYNCED
@@ -457,6 +503,20 @@ class RecordingEditSession:
         author: str | None = None,
         message: str | None = None,
     ) -> SaveResult:
+        pending, conflicts = self._active_recovery_operations()
+        if self._sync_state is SyncState.CONFLICT or conflicts:
+            if conflicts:
+                self._sync_state = SyncState.CONFLICT
+                self._pending_operation_id = conflicts[-1].operation_id
+            raise PendingRecoveryOperationError(
+                "the recording has an unresolved recovery conflict; archive it and reload "
+                "before saving"
+            )
+        if self._sync_state is not SyncState.PENDING and pending:
+            raise PendingRecoveryOperationError(
+                f"recovery operation {pending[-1].operation_id} must be resolved before saving"
+            )
+
         request = SaveRecordingSnapshotRequest(
             recording_id=self.recording_id,
             expected_parent_revision_id=self.base_revision_id,
@@ -476,13 +536,16 @@ class RecordingEditSession:
             request=request,
         )
         self._recovery_outbox.enqueue(envelope)
+        if self._sync_state is SyncState.PENDING:
+            self._capture_queued_save(request, operation_id)
+            return Queued(
+                operation_id=operation_id,
+                revision_id=request.new_revision_id,
+            )
         try:
             snapshot = self._persistence.save_snapshot(request)
         except DatabaseUnavailableError:
-            self._base_revision_id = request.new_revision_id
-            self._checkpoint = self._state
-            self._sync_state = SyncState.PENDING
-            self._pending_operation_id = operation_id
+            self._capture_queued_save(request, operation_id)
             return Queued(operation_id=operation_id, revision_id=request.new_revision_id)
         except ConcurrentRevisionError:
             current_head = self._current_head()
@@ -508,6 +571,16 @@ class RecordingEditSession:
         self._mark_applied_best_effort(operation_id)
         return Saved(snapshot=snapshot)
 
+    def _capture_queued_save(
+        self,
+        request: SaveRecordingSnapshotRequest,
+        operation_id: UUID,
+    ) -> None:
+        self._base_revision_id = request.new_revision_id
+        self._checkpoint = self._state
+        self._sync_state = SyncState.PENDING
+        self._pending_operation_id = operation_id
+
     def _mutate(self, state: _EditableState) -> None:
         if state == self._state:
             return
@@ -526,6 +599,21 @@ class RecordingEditSession:
                 f"recovery operation {operation.operation_id} must be retried or archived"
             )
         self._pending_operation_id = None
+
+    def _active_recovery_operations(
+        self,
+    ) -> tuple[tuple[RecoveryEnvelope, ...], tuple[RecoveryEnvelope, ...]]:
+        pending = tuple(
+            item
+            for item in self._recovery_outbox.list_pending()
+            if item.recording_id == self.recording_id
+        )
+        conflicts = tuple(
+            item
+            for item in self._recovery_outbox.list_conflicts()
+            if item.recording_id == self.recording_id
+        )
+        return pending, conflicts
 
     def _current_head(self) -> UUID | None:
         try:
@@ -556,14 +644,35 @@ class RecordingEditSession:
     def _state_from(
         snapshot: AnnotatedRecordingSnapshot,
         bindings: tuple[LibraryBinding, ...],
+        *,
+        validation_context: AnnotationValidationContext | None = None,
     ) -> _EditableState:
+        if validation_context is None:
+            validation_context = AnnotationValidationContext(bindings)
+        elif validation_context.bindings != bindings:
+            raise PersistenceIntegrityError(
+                "annotation validation cache does not match the pinned libraries"
+            )
+        annotations_by_id = {annotation.id: annotation for annotation in snapshot.annotations}
+        if len(annotations_by_id) != len(snapshot.annotations):
+            raise PersistenceIntegrityError("annotation IDs are duplicated")
         return _EditableState(
             name=snapshot.name,
             language=snapshot.language,
             default_speaker_ref=snapshot.default_speaker_ref,
             bindings=bindings,
             annotations=snapshot.annotations,
+            validation=validation_context,
+            annotations_by_id=MappingProxyType(annotations_by_id),
         )
+
+    def _validation_for(
+        self,
+        bindings: tuple[LibraryBinding, ...],
+    ) -> AnnotationValidationContext:
+        if self._state.bindings == bindings:
+            return self._state.validation
+        return AnnotationValidationContext(bindings)
 
     @staticmethod
     def _matches_query(annotation: SignalAnnotation, query: AnnotationQuery) -> bool:
