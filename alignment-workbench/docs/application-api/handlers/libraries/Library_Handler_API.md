@@ -1,6 +1,6 @@
 # LibraryHandler API
 
-**Status:** Proposed; the lower-level `LibraryStore` is implemented
+**Status:** Implemented
 
 [Application API overview](../../Alignment_Workbench_Unified_Application_API.md)
 

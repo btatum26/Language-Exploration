@@ -28,7 +28,7 @@ The model records the current painted state. It does not execute analysis, retai
 
 ## Related documentation
 
-- [Application API](../application-api/Alignment_Workbench_Unified_Application_API.md) defines the proposed handlers and editing session.
+- [Application API](../application-api/Alignment_Workbench_Unified_Application_API.md) defines the implemented handlers and editing session.
 - [Persistence architecture](../persistence/Persistence_Architecture.md) defines implemented storage ownership.
 - [PostgreSQL schema](../persistence/PostgreSQL_Schema.md) documents the installed Alembic schema.
 - [Data model and persistence testing](../testing/Data_Model_and_Persistence_Testing.md) describes current automated coverage.

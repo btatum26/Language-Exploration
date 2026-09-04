@@ -1,42 +1,42 @@
 # System Architecture
 
-**Status:** Domain and persistence implemented; workbench application layer proposed
+**Status:** Domain, synchronous application API, local audio storage, recovery, and persistence implemented
 
 ## Current system boundary
 
 ```text
-Pydantic domain and request models
+WorkbenchAPI and RecordingEditSession
               |
               v
-Application persistence protocols, read models, and errors
+Application commands, results, validation, and handlers
               |
               v
-SqlAlchemyPersistence
+PersistenceStore   AudioStorageHandler   RecoveryOutbox
+       |                    |                   |
+       v                    v                   v
+SqlAlchemyPersistence  Local WAV storage  Recovery files
               |
               v
 PostgreSQL registry_align schema
 ```
 
-The current checkout contains the portable model and synchronous persistence foundation. It does not contain a Qt GUI, playback engine, editing session, analysis runner, audio-ingestion service, or recovery outbox.
+The current checkout contains the portable model, synchronous application API, in-memory editing session, immutable WAV storage, durable recovery outbox, and synchronous PostgreSQL persistence. It does not contain a Qt GUI, playback engine, CLI presentation layer, or analysis runner.
 
-`AudioResolver` is the only current audio-service boundary. It resolves a logical storage URI to a local path; no concrete resolver or ingestion implementation is present.
+`LocalAudioStorage` ingests, resolves, and verifies PCM WAV assets below one configured root. It uses `registry-audio://assets/<uuid>` as the stable logical URI.
 
-## Proposed application boundary
+## Application boundary
 
-The [application API](application-api/Alignment_Workbench_Unified_Application_API.md) defines the
-next layer and owns its detailed component map. Its handler, session, audio-storage, and recovery
-contracts are proposals. The implemented `PersistenceStore` protocols are the stable lower
-boundary they will call.
+The [application API](application-api/Alignment_Workbench_Unified_Application_API.md) defines the public synchronous boundary and owns its detailed component map. Its handlers and edit sessions call injected `PersistenceStore`, `AudioStorageHandler`, and `RecoveryOutbox` ports.
 
 ## Dependency rules
 
 - Domain models in `src/models.py` do not import persistence or framework types.
-- Public persistence protocols, read models, and errors in `src/application/` do not expose SQLAlchemy.
+- Public handlers, contracts, persistence protocols, read models, and errors in `src/application/` do not expose SQLAlchemy.
 - SQLAlchemy rows, sessions, expressions, and PostgreSQL types remain inside `src/persistence/sqlalchemy/`.
 - Each public persistence call owns one short-lived session and transaction.
 - PostgreSQL stores metadata and immutable snapshots, not audio bytes.
 - Analysis systems produce ordinary `SignalAnnotation` values and do not write SQL directly.
-- GUI, CLI, audio, recovery, and analysis code must depend inward through application contracts.
+- GUI, CLI, and analysis code must depend inward through application contracts.
 
 ## Data and history
 
@@ -44,7 +44,7 @@ PostgreSQL is authoritative for recording revisions and published library versio
 
 Audio identity and metadata are stored in PostgreSQL through `AudioAsset`, while bytes remain outside the database. The canonical locator is `registry-audio://assets/<uuid>`.
 
-Edit-session undo history and pending recovery operations are not canonical PostgreSQL history. They belong to the proposed application layer.
+Edit-session undo history and pending recovery operations are not canonical PostgreSQL history. Undo history is memory-only; recovery envelopes are durable local operations awaiting an explicit outcome.
 
 ## Documentation map
 

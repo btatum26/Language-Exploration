@@ -1,8 +1,8 @@
 # Alignment Workbench Unified Application API
 
-**Status:** Proposed application contract
+**Status:** Implemented
 
-**Implemented foundation:** Domain models and `PersistenceStore`; public handlers, edit sessions, audio ingestion, and recovery remain unimplemented
+**Implementation:** `src/application/` provides the public handlers, edit session, shared types, validation, local audio storage, recovery outbox, and composition root. `PersistenceStore` remains the injected database boundary.
 
 **Scope:** Data models, data handling, recording editing, persistence coordination, local audio, and recovery
 
@@ -13,7 +13,7 @@
 The documentation follows the system boundary from public application contracts through handlers and edit sessions to injected infrastructure ports. Recovery and testing remain separate because they coordinate or verify the other parts rather than belonging to one recording operation.
 
 - [Shared application contracts](shared/Shared_Application_Contracts.md) define the entry point, common types, versioning, validation, errors, and lifecycle.
-- [Application API usage](Usage.md) shows the intended editing and external-analysis flow.
+- [Application API usage](Usage.md) shows the editing and external-analysis flow.
 - Public handlers expose application behavior:
   - Recordings
     - [RecordingHandler API](handlers/recording/Recording_Handler_API.md) covers the recording catalog, creation, opening, and revision access.
@@ -24,7 +24,7 @@ The documentation follows the system boundary from public application contracts 
 - Internal ports connect handlers to infrastructure:
   - [AudioStorageHandler API](ports/Audio_Storage_Handler_API.md) defines immutable local audio ingestion, resolution, and verification.
   - [PersistenceStore API](ports/Persistence_Port_API.md) defines the database boundary used by the application handlers.
-- [Application API testing](testing/Application_API_Testing.md) defines the required future handler and edit-session contract coverage.
+- [Application API testing](testing/Application_API_Testing.md) maps the implemented handler and edit-session contract coverage.
 
 ## Related documentation
 

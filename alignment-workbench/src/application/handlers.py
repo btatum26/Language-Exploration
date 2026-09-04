@@ -344,14 +344,30 @@ class RecoveryHandler:
 
     def retry_all(self) -> tuple[RecoveryResult, ...]:
         results: list[RecoveryResult] = []
-        conflicted_recordings: set[UUID] = set()
-        for envelope in self._recovery_outbox.list_pending():
-            if envelope.recording_id in conflicted_recordings:
-                continue
+        blocked_recordings: set[UUID] = set()
+        remaining = list(self._recovery_outbox.list_pending())
+        while remaining:
+            pending_revision_ids = {(item.recording_id, item.revision_id) for item in remaining}
+            ready_index = next(
+                (
+                    index
+                    for index, item in enumerate(remaining)
+                    if item.recording_id not in blocked_recordings
+                    and (
+                        item.expected_head_revision_id is None
+                        or (item.recording_id, item.expected_head_revision_id)
+                        not in pending_revision_ids
+                    )
+                ),
+                None,
+            )
+            if ready_index is None:
+                break
+            envelope = remaining.pop(ready_index)
             result = self.retry(envelope.operation_id)
             results.append(result)
-            if isinstance(result, RecoveryConflict):
-                conflicted_recordings.add(envelope.recording_id)
+            if isinstance(result, (PendingSave, RecoveryConflict)):
+                blocked_recordings.add(envelope.recording_id)
         return tuple(results)
 
     def archive(self, operation_id: UUID) -> None:

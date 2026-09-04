@@ -142,7 +142,7 @@ def validate_annotation(
     if isinstance(geometry, (TimeFrequencyBoxGeometry, TimeFrequencyPolygonGeometry)):
         nyquist_hz = audio_asset.sample_rate_hz / 2
         if geometry.max_frequency_hz > nyquist_hz:
-            raise GeometryNotAllowedError(
+            raise GeometryOutOfBoundsError(
                 f"geometry exceeds the audio Nyquist frequency of {nyquist_hz:g} Hz"
             )
 

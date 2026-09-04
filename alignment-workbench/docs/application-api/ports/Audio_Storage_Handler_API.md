@@ -1,6 +1,6 @@
 # Internal AudioStorageHandler port
 
-**Status:** Proposed; only the narrower `AudioResolver.resolve(storage_uri) -> Path` protocol exists
+**Status:** Implemented for uncompressed PCM WAV files
 
 [Application API overview](../Alignment_Workbench_Unified_Application_API.md)
 
@@ -42,6 +42,8 @@ Resolution:
 - does not hash the entire file during every normal open.
 
 Full hashing belongs to ingestion and explicit `verify` or maintenance audits.
+
+`LocalAudioStorage` is the concrete implementation. The current decoder boundary accepts uncompressed PCM WAV input and reports `UnsupportedAudioError` for other formats or compressed WAV data.
 
 ## Immutability
 

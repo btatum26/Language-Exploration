@@ -15,9 +15,16 @@ src/models.py
     immutable domain models and create/save requests
 
 src/application/
-    persistence.py   framework-free store protocols
-    read_models.py   frozen query projections
-    errors.py        stable persistence exceptions
+    workbench.py      composition root
+    handlers.py       public application handlers
+    edit_session.py   in-memory recording editing
+    contracts.py      commands, results, and infrastructure ports
+    validation.py     concepts, JSON Schema, geometry, and hashes
+    audio_storage.py  immutable local WAV storage
+    recovery.py       durable filesystem recovery outbox
+    persistence.py    framework-free store protocols
+    read_models.py    frozen query projections
+    errors.py         stable application exceptions
 
 src/persistence/
     audio/resolver.py           logical URI resolution protocol
@@ -41,7 +48,8 @@ alembic/
 | `SqlAlchemyPersistence` | Session lifecycle, transactions, repositories, error translation | GUI state, audio bytes, recovery files |
 | Repositories and mappers | Bounded queries, inserts, exact hydration | Commits or public framework types |
 | PostgreSQL | Referential integrity, uniqueness, basic shape checks, linear history | JSON Schema evaluation, audio files |
-| Audio resolver protocol | Logical URI to path boundary | Ingestion, copying, decoding, playback |
+| Audio storage | Immutable PCM WAV ingestion, logical URI resolution, and verification | Playback or in-place mutation |
+| Recovery outbox | Durable pending operations, conflicts, retry records, and archival | Canonical revision history |
 
 ## Data placement
 
@@ -61,19 +69,11 @@ The [database foundation](PostgreSQL_Database_Foundation.md) owns configuration,
 - Snapshot models enforce aggregate-local identity, pin, and audio-frame rules.
 - Persistence resolves stored library versions and entries, verifies content hashes and permitted geometry, and relies on PostgreSQL for structural integrity.
 - Trusted reads use one centralized hydration path.
-- JSON Schema policy, Nyquist checks, edit commands, and recovery coordination belong to the proposed application layer.
+- The application layer enforces JSON Schema policy, Nyquist and audio-frame bounds, edit commands, and recovery coordination.
 
-## Future integration points
+## Remaining integration points
 
-The following are documented contracts but are not implemented in this checkout:
-
-- `WorkbenchAPI` and its handlers;
-- `RecordingEditSession` and undo/redo state;
-- immutable audio ingestion and a concrete storage resolver;
-- the durable recovery outbox and retry coordinator;
-- GUI and CLI integration.
-
-Their target contracts are in the [application API documentation](../application-api/Alignment_Workbench_Unified_Application_API.md).
+GUI, playback, CLI presentation, and external analysis integrations are not implemented in this checkout. They consume the [application API](../application-api/Alignment_Workbench_Unified_Application_API.md) without writing SQL or recovery files directly.
 
 ## Exclusions
 

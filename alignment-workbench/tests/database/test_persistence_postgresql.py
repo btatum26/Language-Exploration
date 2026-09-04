@@ -313,6 +313,8 @@ def test_complete_recording_current_snapshot_and_workspace(
     assert current == created
     assert created.revision.id == request.initial_revision_id
     assert store.create_recording(request) == created
+    with pytest.raises(PersistenceIntegrityError, match="different content"):
+        store.create_recording(request.model_copy(update={"name": "Different retry"}))
     assert isinstance(current, AnnotatedRecordingSnapshot)
     assert not isinstance(current, Session)
     assert not type(workspace).__module__.startswith("persistence.sqlalchemy")
@@ -367,6 +369,8 @@ def test_historical_load_append_only_save_and_stale_editor_rejection(
     assert [item.metadata.id for item in history] == [first.revision.id, second.revision.id]
     assert [item.annotation_count for item in history] == [4, 4]
     assert store.save_snapshot(save) == second
+    with pytest.raises(PersistenceIntegrityError, match="different content"):
+        store.save_snapshot(save.model_copy(update={"name": "Different retry"}))
     stale_request = SaveRecordingSnapshotRequest(
         recording_id=save.recording_id,
         expected_parent_revision_id=save.expected_parent_revision_id,

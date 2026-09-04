@@ -1,6 +1,6 @@
 # Application API Usage
 
-**Status:** Proposed; the `WorkbenchAPI` and edit-session implementation do not yet exist
+**Status:** Implemented
 
 [Application API overview](Alignment_Workbench_Unified_Application_API.md)
 

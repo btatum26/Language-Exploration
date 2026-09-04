@@ -1,8 +1,8 @@
 # Data Model and Persistence Testing
 
-**Status:** Implemented coverage for the current domain and persistence layers
+**Status:** Implemented coverage for the domain, application, and persistence layers
 
-**Scope:** Tests present in this checkout; proposed handler/session tests are documented separately
+**Scope:** Tests present in this checkout
 
 ## Test suites
 
@@ -10,6 +10,7 @@
 | --- | --- |
 | `tests/test_domain_models.py` | Strict immutable models, deterministic JSON, geometry, snapshots, and stable create/save revision IDs |
 | `tests/test_persistence_mappers.py` | Domain-to-row values and trusted row-to-domain hydration |
+| `tests/test_application_api.py` | Public handlers, edit sessions, validation, WAV storage, durable recovery, retries, and conflicts |
 | `tests/database/test_snapshot_metadata.py` | ORM metadata, constraints, indexes, engine, and session configuration |
 | `tests/database/test_snapshot_postgresql.py` | Alembic lifecycle and PostgreSQL constraint behavior |
 | `tests/database/test_persistence_postgresql.py` | Store CRUD, bounded reads, ordered hydration, atomic creation/saves, retries, and real concurrent-save behavior |
@@ -27,7 +28,7 @@ The unit suite covers:
 - deterministic serialization;
 - stable `initial_revision_id` and `new_revision_id` values across serialization.
 
-Library-specific JSON Schema policy and Nyquist validation belong to the proposed application layer and are not current domain-model guarantees.
+Library-specific JSON Schema policy and Nyquist validation belong to the application layer rather than the domain models.
 
 ## Persistence coverage
 
@@ -52,9 +53,9 @@ Runtime-role tests are separate and opt in through `TEST_RUNTIME_DATABASE_URL`. 
 
 ## Application coverage
 
-The handler, edit-session, audio-storage, and recovery contracts are proposed and have no implementation tests yet. Their required future contract cases are in [Application API testing](../application-api/testing/Application_API_Testing.md).
+The handler, edit-session, audio-storage, and recovery contracts are covered in `tests/test_application_api.py`. The case map is in [Application API testing](../application-api/testing/Application_API_Testing.md).
 
-Producer and GUI behavior also remain future integration work. Analysis-boundary expectations are documented in [Analysis notes](../data-models/Analysis_Notes.md).
+Producer-specific abstractions remain excluded, and GUI behavior remains future integration work. Analysis-boundary expectations are documented in [Analysis notes](../data-models/Analysis_Notes.md).
 
 ## Commands
 

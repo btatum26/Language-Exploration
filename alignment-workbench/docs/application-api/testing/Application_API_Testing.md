@@ -1,14 +1,14 @@
 # Application API Testing
 
-**Status:** Proposed contract coverage; the public handlers and edit session are not implemented
+**Status:** Implemented contract coverage
 
 [Application API overview](../Alignment_Workbench_Unified_Application_API.md)
 
 ## Contract testing requirements
 
-The application API should be tested against fake ports before infrastructure integration.
+The application API is tested against a contract-faithful in-memory persistence port and real temporary audio and recovery directories in `tests/test_application_api.py`.
 
-Required contract tests include:
+The contract tests cover:
 
 1. Create, open, annotate, save, and reopen a recording.
 2. Opened sessions contain no ORM rows or database sessions.

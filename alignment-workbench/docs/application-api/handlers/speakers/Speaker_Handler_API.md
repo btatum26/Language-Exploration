@@ -1,6 +1,6 @@
 # SpeakerHandler API
 
-**Status:** Proposed; the lower-level `SpeakerStore` is implemented
+**Status:** Implemented
 
 [Application API overview](../../Alignment_Workbench_Unified_Application_API.md)
 

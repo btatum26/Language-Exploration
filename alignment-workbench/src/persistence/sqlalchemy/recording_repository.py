@@ -135,6 +135,7 @@ class RecordingRepository:
             parent_revision_id=None,
         )
         if completed is not None:
+            self._require_matching_create_retry(completed, request)
             return completed
         if self._session.get(RecordingRow, request.recording_id) is not None:
             raise PersistenceIntegrityError(f"recording {request.recording_id} already exists")
@@ -192,6 +193,7 @@ class RecordingRepository:
             parent_revision_id=request.expected_parent_revision_id,
         )
         if completed is not None:
+            self._require_matching_save_retry(completed, request)
             return completed
         state = self._session.execute(
             select(RecordingRow, AudioAssetRow, RecordingRevisionRow)
@@ -276,6 +278,45 @@ class RecordingRepository:
                 f"revision ID {revision_id} is already bound to incompatible history"
             )
         return load_snapshot(self._session, recording_id, revision_id)
+
+    @staticmethod
+    def _require_matching_create_retry(
+        snapshot: AnnotatedRecordingSnapshot,
+        request: CreateRecordingRequest,
+    ) -> None:
+        compatible = (
+            snapshot.audio_asset == request.audio_asset
+            and snapshot.name == request.name
+            and snapshot.default_speaker_ref == request.default_speaker_ref
+            and snapshot.language == request.language
+            and snapshot.revision.author == request.author
+            and snapshot.revision.message == request.message
+            and snapshot.libraries == request.libraries
+            and snapshot.annotations == request.annotations
+        )
+        if not compatible:
+            raise PersistenceIntegrityError(
+                f"revision ID {request.initial_revision_id} already has different content"
+            )
+
+    @staticmethod
+    def _require_matching_save_retry(
+        snapshot: AnnotatedRecordingSnapshot,
+        request: SaveRecordingSnapshotRequest,
+    ) -> None:
+        compatible = (
+            snapshot.name == request.name
+            and snapshot.default_speaker_ref == request.default_speaker_ref
+            and snapshot.language == request.language
+            and snapshot.revision.author == request.author
+            and snapshot.revision.message == request.message
+            and snapshot.libraries == request.libraries
+            and snapshot.annotations == request.annotations
+        )
+        if not compatible:
+            raise PersistenceIntegrityError(
+                f"revision ID {request.new_revision_id} already has different content"
+            )
 
     def _resolve_versions(
         self, pins: tuple[PinnedLibraryVersion, ...]

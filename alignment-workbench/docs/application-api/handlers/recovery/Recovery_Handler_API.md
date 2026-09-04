@@ -1,6 +1,6 @@
 # RecoveryHandler API
 
-**Status:** Proposed; no recovery outbox or handler is implemented
+**Status:** Implemented
 
 [Application API overview](../../Alignment_Workbench_Unified_Application_API.md)
 

@@ -152,7 +152,7 @@ generic graph behavior.
 
 ## Usage
 
-Future application code can use the boundary without importing SQLAlchemy:
+Application code uses the boundary without importing SQLAlchemy:
 
 ```python
 import os
