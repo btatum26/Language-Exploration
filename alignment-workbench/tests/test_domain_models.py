@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -12,6 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 from src.models import (
     AnnotatedRecordingSnapshot,
     ConceptRef,
+    CreateRecordingRequest,
     Geometry,
     Library,
     LibraryEntry,
@@ -69,11 +70,42 @@ def test_save_request_is_the_complete_editable_part_of_a_snapshot() -> None:
 
     serialized = request.to_deterministic_json()
 
-    assert SaveRecordingSnapshotRequest.model_validate_json(serialized) == request
+    reparsed = SaveRecordingSnapshotRequest.model_validate_json(serialized)
+
+    assert reparsed == request
+    assert reparsed.new_revision_id == request.new_revision_id
 
     missing_parent = request.model_dump(mode="json", exclude={"expected_parent_revision_id"})
     with pytest.raises(ValidationError, match="expected_parent_revision_id"):
         SaveRecordingSnapshotRequest.model_validate(missing_parent)
+
+
+def test_create_and_save_requests_own_stable_revision_ids() -> None:
+    snapshot = AnnotatedRecordingSnapshot.model_validate_json(EXAMPLE_PATH.read_text("utf-8"))
+    create = CreateRecordingRequest(
+        recording_id=uuid4(),
+        audio_asset=snapshot.audio_asset,
+        name=snapshot.name,
+        default_speaker_ref=snapshot.default_speaker_ref,
+        language=snapshot.language,
+        libraries=snapshot.libraries,
+        annotations=snapshot.annotations,
+    )
+
+    reparsed = CreateRecordingRequest.model_validate_json(create.to_deterministic_json())
+
+    assert reparsed.initial_revision_id == create.initial_revision_id
+    assert (
+        CreateRecordingRequest(
+            recording_id=uuid4(),
+            audio_asset=snapshot.audio_asset,
+            name=snapshot.name,
+            language=snapshot.language,
+            libraries=snapshot.libraries,
+            annotations=snapshot.annotations,
+        ).initial_revision_id
+        != create.initial_revision_id
+    )
 
 
 def test_concept_ref_is_a_string_in_snapshot_json() -> None:

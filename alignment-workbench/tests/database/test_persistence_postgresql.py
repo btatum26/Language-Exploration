@@ -3,15 +3,18 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Barrier
 from uuid import UUID, uuid4
 
 import pytest
 from alembic.config import Config
 from sqlalchemy import Connection, Engine, create_engine, event
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
@@ -308,6 +311,8 @@ def test_complete_recording_current_snapshot_and_workspace(
     workspace = store.load_workspace(request.recording_id)
 
     assert current == created
+    assert created.revision.id == request.initial_revision_id
+    assert store.create_recording(request) == created
     assert isinstance(current, AnnotatedRecordingSnapshot)
     assert not isinstance(current, Session)
     assert not type(workspace).__module__.startswith("persistence.sqlalchemy")
@@ -353,6 +358,7 @@ def test_historical_load_append_only_save_and_stale_editor_rejection(
 
     second = store.save_snapshot(save)
 
+    assert second.revision.id == save.new_revision_id
     assert second.revision.number == 2
     assert second.revision.parent_id == first.revision.id
     assert store.load_snapshot(request.recording_id).revision.id == second.revision.id
@@ -360,8 +366,118 @@ def test_historical_load_append_only_save_and_stale_editor_rejection(
     history = store.list_recording_revisions(request.recording_id)
     assert [item.metadata.id for item in history] == [first.revision.id, second.revision.id]
     assert [item.annotation_count for item in history] == [4, 4]
+    assert store.save_snapshot(save) == second
+    stale_request = SaveRecordingSnapshotRequest(
+        recording_id=save.recording_id,
+        expected_parent_revision_id=save.expected_parent_revision_id,
+        name=save.name,
+        default_speaker_ref=save.default_speaker_ref,
+        language=save.language,
+        author=save.author,
+        message=save.message,
+        libraries=save.libraries,
+        annotations=save.annotations,
+    )
     with pytest.raises(ConcurrentRevisionError):
-        store.save_snapshot(save)
+        store.save_snapshot(stale_request)
+    assert len(store.list_recording_revisions(request.recording_id)) == 2
+
+
+def test_reused_revision_id_with_incompatible_history_is_rejected(
+    persistence_store: StoreFixture,
+) -> None:
+    request, first, _ = _complete_recording(persistence_store.store)
+    incompatible = SaveRecordingSnapshotRequest(
+        recording_id=request.recording_id,
+        new_revision_id=first.revision.id,
+        expected_parent_revision_id=first.revision.id,
+        name=request.name,
+        default_speaker_ref=request.default_speaker_ref,
+        language=request.language,
+        libraries=request.libraries,
+        annotations=request.annotations,
+    )
+
+    with pytest.raises(PersistenceIntegrityError, match="incompatible history"):
+        persistence_store.store.save_snapshot(incompatible)
+
+
+def test_two_connections_racing_from_same_head_translate_constraint_conflict(
+    persistence_engine: Engine,
+) -> None:
+    factory = sessionmaker(
+        bind=persistence_engine,
+        class_=Session,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+    store = SqlAlchemyPersistence(factory)
+    request, first, _ = _complete_recording(store)
+    saves = tuple(
+        SaveRecordingSnapshotRequest(
+            recording_id=request.recording_id,
+            expected_parent_revision_id=first.revision.id,
+            name=f"Concurrent revision {index}",
+            default_speaker_ref=request.default_speaker_ref,
+            language=request.language,
+            author="integration",
+            message=f"concurrent-{index}",
+            libraries=request.libraries,
+            annotations=request.annotations,
+        )
+        for index in range(2)
+    )
+    barrier = Barrier(2)
+    connection_ids: set[int] = set()
+
+    def synchronize_after_head_read(
+        connection: Connection,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        normalized = " ".join(statement.upper().split())
+        if (
+            normalized.startswith("SELECT")
+            and ".RECORDINGS" in normalized
+            and ".AUDIO_ASSETS" in normalized
+            and "LEFT OUTER JOIN" in normalized
+            and ".RECORDING_REVISIONS" in normalized
+            and id(connection) not in connection_ids
+        ):
+            connection_ids.add(id(connection))
+            barrier.wait(timeout=15)
+
+    def attempt_save(
+        save: SaveRecordingSnapshotRequest,
+    ) -> AnnotatedRecordingSnapshot | ConcurrentRevisionError:
+        try:
+            return store.save_snapshot(save)
+        except ConcurrentRevisionError as exc:
+            return exc
+
+    event.listen(persistence_engine, "after_cursor_execute", synchronize_after_head_read)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = tuple(executor.map(attempt_save, saves))
+    finally:
+        event.remove(persistence_engine, "after_cursor_execute", synchronize_after_head_read)
+
+    successes = [result for result in results if isinstance(result, AnnotatedRecordingSnapshot)]
+    conflicts = [result for result in results if isinstance(result, ConcurrentRevisionError)]
+    assert len(connection_ids) == 2
+    assert len(successes) == 1
+    assert len(conflicts) == 1
+    cause = conflicts[0].__cause__
+    assert isinstance(cause, IntegrityError)
+    diagnostic = getattr(cause.orig, "diag", None)
+    assert getattr(diagnostic, "constraint_name", None) in {
+        "uq_recording_revisions_parent_revision_id_not_null",
+        "uq_recording_revisions_recording_id_revision_number",
+    }
+    assert store.load_snapshot(request.recording_id).revision.id == successes[0].revision.id
     assert len(store.list_recording_revisions(request.recording_id)) == 2
 
 
@@ -408,7 +524,7 @@ def test_intentional_failure_rolls_back_initial_recording_atomically(
         store.get_audio_asset(audio.id)
 
 
-def test_workspace_uses_four_queries_and_has_no_lazy_loads(
+def test_workspace_uses_at_most_four_queries_and_has_no_lazy_loads(
     persistence_store: StoreFixture,
 ) -> None:
     request, _, _ = _complete_recording(persistence_store.store)
@@ -430,7 +546,7 @@ def test_workspace_uses_four_queries_and_has_no_lazy_loads(
         select_statements = [
             statement for statement in statements if statement.lstrip().upper().startswith("SELECT")
         ]
-        assert len(select_statements) == 4
+        assert len(select_statements) <= 4
         assert workspace.snapshot.annotations[-1].geometry.type == "time_frequency_polygon"
         assert workspace.library_versions[-1].entries[-1].display_name
         assert workspace.default_speaker is not None
@@ -442,10 +558,44 @@ def test_workspace_uses_four_queries_and_has_no_lazy_loads(
                     if statement.lstrip().upper().startswith("SELECT")
                 ]
             )
-            == 4
+            <= 4
         )
     finally:
         event.remove(persistence_store.connection, "before_cursor_execute", before_cursor_execute)
+
+
+def test_workspace_without_pins_uses_three_queries(persistence_store: StoreFixture) -> None:
+    request = CreateRecordingRequest(
+        recording_id=uuid4(),
+        audio_asset=_audio(),
+        name="Unpinned workspace",
+        language="it",
+        libraries=(),
+        annotations=(),
+    )
+    persistence_store.store.create_recording(request)
+    statements: list[str] = []
+
+    def before_cursor_execute(
+        _connection: Connection,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(persistence_store.connection, "before_cursor_execute", before_cursor_execute)
+    try:
+        workspace = persistence_store.store.load_workspace(request.recording_id)
+    finally:
+        event.remove(persistence_store.connection, "before_cursor_execute", before_cursor_execute)
+
+    assert len(statements) == 3
+    assert workspace.snapshot.libraries == ()
+    assert workspace.library_versions == ()
 
 
 def test_realistic_5800_annotation_workspace_reports_query_and_mapping_time(

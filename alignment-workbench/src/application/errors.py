@@ -1,7 +1,11 @@
-"""Stable exceptions exposed by the application persistence boundary."""
+"""Stable exceptions exposed by the workbench application boundary."""
 
 
-class PersistenceError(RuntimeError):
+class WorkbenchError(RuntimeError):
+    """Base class for expected application failures."""
+
+
+class PersistenceError(WorkbenchError):
     """Base class for expected persistence failures."""
 
 
@@ -39,3 +43,59 @@ class DatabaseUnavailableError(PersistenceError):
 
 class PersistenceIntegrityError(PersistenceError):
     """Persisted data or a write violated the persistence contract."""
+
+
+class AnnotationNotFoundError(WorkbenchError):
+    """The requested annotation does not exist in the edit session."""
+
+
+class DuplicateAnnotationError(WorkbenchError):
+    """An annotation ID is already present in the edit session."""
+
+
+class ConceptNotFoundError(WorkbenchError):
+    """A concept does not exist in the referenced pinned library version."""
+
+
+class ConceptNotPinnedError(WorkbenchError):
+    """A concept references a library version that is not pinned."""
+
+
+class GeometryNotAllowedError(WorkbenchError):
+    """An annotation geometry is not allowed by its library entry."""
+
+
+class GeometryOutOfBoundsError(WorkbenchError):
+    """Annotation geometry exceeds the immutable audio bounds."""
+
+
+class InvalidAnnotationAttributesError(WorkbenchError):
+    """Annotation attributes fail the selected entry's JSON Schema."""
+
+
+class LibraryVersionInUseError(WorkbenchError):
+    """A pinned library version is still referenced by annotations."""
+
+
+class AudioUnavailableError(WorkbenchError):
+    """Audio cannot be found or resolved through the configured storage root."""
+
+
+class AudioIntegrityError(WorkbenchError):
+    """Audio bytes or metadata violate the immutable storage contract."""
+
+
+class UnsupportedAudioError(WorkbenchError):
+    """The audio format is not supported by the local storage implementation."""
+
+
+class InvalidRecoveryEnvelopeError(WorkbenchError):
+    """A durable recovery envelope is malformed or incompatible."""
+
+
+class RecoveryStorageError(WorkbenchError):
+    """The recovery outbox could not durably store or move an operation."""
+
+
+class PendingRecoveryOperationError(WorkbenchError):
+    """An operation must be resolved through RecoveryHandler before discarding state."""

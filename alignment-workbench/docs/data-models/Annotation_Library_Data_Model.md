@@ -1,8 +1,8 @@
 # Annotation Library Data Model
 
-Status: Proposed
+**Status:** Implemented model and persistence shape; concrete library contents remain proposed
 
-Scope: Reusable annotation meanings, immutable versions, and concept references
+**Scope:** Reusable annotation meanings, immutable versions, and concept references
 
 ## Purpose
 
@@ -36,7 +36,7 @@ project.italian-exploration
 
 ## Library version
 
-Every published `AnnotationLibraryVersion` is immutable. A version contains:
+Every published `LibraryVersion` is immutable. A version contains:
 
 - Library-version UUID
 - Parent library UUID
@@ -128,7 +128,7 @@ namespace and version are absent from that manifest.
 
 ## Unclassified entries
 
-The core library includes at least:
+A future core library should include at least:
 
 ```text
 unclassified-point-event
@@ -140,7 +140,7 @@ These entries preserve unusual evidence without prematurely forcing it into IPA 
 
 ## Attribute validation
 
-An entry's `attribute_schema` defines valid occurrence-specific attributes. The database stores attributes as JSONB; the application service performs JSON Schema validation against the exact pinned entry.
+An entry's `attribute_schema` defines valid occurrence-specific attributes. The database stores attributes as JSONB. JSON Schema evaluation against the exact pinned entry belongs to the proposed application layer.
 
 Optional validation hints may describe minimum duration, ranges, producer conventions, or visual grouping. Library-specific rules must not silently create a universal linguistic hierarchy.
 

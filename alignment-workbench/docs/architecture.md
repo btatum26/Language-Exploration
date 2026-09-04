@@ -1,64 +1,56 @@
-# Architecture boundary
+# System Architecture
+
+**Status:** Domain and persistence implemented; workbench application layer proposed
+
+## Current system boundary
 
 ```text
-Qt Widgets
-  │ intentions / render-only state
-  ▼
-EditorSession (integer-frame authority) ──► SessionAudioEngine adapter
-  │                                           │
-  │ background requests                       ▼
-  ▼                                    Spectrogram Playground
-RegistryServices facade                 decoder, mixer, playback,
-  │ persistent SSH tunnel + engine      recorder, waveform/STFT/FFT
-  ▼
-RegistryWorkbenchService (Qt-free)
-  ├── AlignmentService / MFA processing
-  ├── repository protocols / PostgreSQL unit of work
-  ├── immutable segment revisions
-  └── corpus path + content-hash artifact resolution
+Pydantic domain and request models
+              |
+              v
+Application persistence protocols, read models, and errors
+              |
+              v
+SqlAlchemyPersistence
+              |
+              v
+PostgreSQL registry_align schema
 ```
 
-## Qt UI
+The current checkout contains the portable model and synchronous persistence foundation. It does not contain a Qt GUI, playback engine, editing session, analysis runner, audio-ingestion service, or recovery outbox.
 
-The main thread owns widgets only. `LibraryPanel`, `TimelineEditor`, `TrackWidget`,
-`SoundInspector`, and `RecordingPanel` read central state and emit user intentions. Long-running
-work is submitted through `TaskManager`, which tags results with request UUIDs and ignores stale
-results after a replacement query.
+`AudioResolver` is the only current audio-service boundary. It resolves a logical storage URI to a local path; no concrete resolver or ingestion implementation is present.
 
-## Editor state
+## Proposed application boundary
 
-`EditorSession` owns track order, source identities, clips, active/reference tracks, selection,
-viewport, playhead, tool, mute/solo/gain, per-track display mode, and dirty edits. Frames at the
-session sample rate are authoritative. Segment database timebases are preserved and converted only
-at service/UI boundaries.
+The [application API](application-api/Alignment_Workbench_Unified_Application_API.md) defines the
+next layer and owns its detailed component map. Its handler, session, audio-storage, and recovery
+contracts are proposals. The implemented `PersistenceStore` protocols are the stable lower
+boundary they will call.
 
-`SessionEventType` separates viewport, playhead, selection, segment, content, mix, and layout
-changes. `TimelineEditor` coalesces pan deltas from every lane through one 16 ms single-shot timer,
-then applies the accumulated integer-frame movement to the shared viewport. Viewport events update
-plot ranges, tiers, and the scrollbar value; playhead and selection events touch only their own plot
-items. Scrollbar range and step metrics are recalculated only when duration or zoom width changes.
+## Dependency rules
 
-## Audio and analysis
+- Domain models in `src/models.py` do not import persistence or framework types.
+- Public persistence protocols, read models, and errors in `src/application/` do not expose SQLAlchemy.
+- SQLAlchemy rows, sessions, expressions, and PostgreSQL types remain inside `src/persistence/sqlalchemy/`.
+- Each public persistence call owns one short-lived session and transaction.
+- PostgreSQL stores metadata and immutable snapshots, not audio bytes.
+- Analysis systems produce ordinary `SignalAnnotation` values and do not write SQL directly.
+- GUI, CLI, audio, recovery, and analysis code must depend inward through application contracts.
 
-`SessionAudioEngine` renders non-destructive clip references to arrays outside the callback and
-adapts them to Spectrogram Playground's `Project`, `Mixer`, and `AudioEngine`. One output stream and
-one frame clock mix all tracks. The output callback remains free of decoding, I/O, logging, Qt, and
-analysis. Waveform, spectrogram, spectrum, resampling, and microphone code is imported from the
-existing native app rather than copied.
+## Data and history
 
-## Registry and PostgreSQL
+PostgreSQL is authoritative for recording revisions and published library versions. A recording points to one immutable audio asset and one current head revision. Each save appends a complete snapshot and advances the head with optimistic compare-and-swap semantics.
 
-`RegistryWorkbenchService` is a public, Qt-free application boundary inside
-`alignment-workbench`.
-The GUI never imports `storage.tables`, a SQLAlchemy engine, or MFA parsers. Catalog, detail,
-speaker, version, revision, ingestion, and alignment calls pass through repository protocols and
-unit-of-work transactions.
+Audio identity and metadata are stored in PostgreSQL through `AudioAsset`, while bytes remain outside the database. The canonical locator is `registry-audio://assets/<uuid>`.
 
-`RegistryServices` loads `alignment-workbench/.env`, starts the configured SSH tunnel in the
-background connection task, and injects one pooled PostgreSQL engine into the backend for the
-application lifetime. Shutdown waits for outstanding tasks before disposing the engine and stopping
-the owned tunnel. Retry creates a fresh tunnel after a failed startup.
+Edit-session undo history and pending recovery operations are not canonical PostgreSQL history. They belong to the proposed application layer.
 
-PostgreSQL stores metadata, versions, alignments, model segments, and immutable revisions. Audio
-bytes remain in the configured corpus or remote object store. A resolved local cache is keyed by
-the stored SHA-256; absolute workstation paths are never authoritative database state.
+## Documentation map
+
+- [Data model](data-models/Language_Exploration_Signal_Annotation_Data_Model.md)
+- [Persistence architecture](persistence/Persistence_Architecture.md)
+- [PostgreSQL schema](persistence/PostgreSQL_Schema.md)
+- [SQLAlchemy persistence layer](persistence/SQLAlchemy_Persistence_Layer.md)
+- [Application API](application-api/Alignment_Workbench_Unified_Application_API.md)
+- [Current test coverage](testing/Data_Model_and_Persistence_Testing.md)

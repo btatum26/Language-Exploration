@@ -7,7 +7,7 @@ import math
 import re
 from datetime import datetime
 from typing import Annotated, Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import (
     BaseModel,
@@ -414,6 +414,7 @@ class CreateRecordingRequest(DomainModel):
     """Complete initial state submitted to create a recording and revision one."""
 
     recording_id: UUID
+    initial_revision_id: UUID = Field(default_factory=uuid4)
     audio_asset: AudioAsset
     name: NonEmptyStr
     default_speaker_ref: UUID | None = None
@@ -433,6 +434,7 @@ class SaveRecordingSnapshotRequest(DomainModel):
     """Complete editable state submitted to create the next revision."""
 
     recording_id: UUID
+    new_revision_id: UUID = Field(default_factory=uuid4)
     expected_parent_revision_id: UUID | None
     name: NonEmptyStr
     default_speaker_ref: UUID | None = None

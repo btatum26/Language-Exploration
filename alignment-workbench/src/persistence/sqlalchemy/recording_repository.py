@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -129,6 +129,13 @@ class RecordingRepository:
         )
 
     def create(self, request: CreateRecordingRequest) -> AnnotatedRecordingSnapshot:
+        completed = self._load_idempotent_revision(
+            request.initial_revision_id,
+            recording_id=request.recording_id,
+            parent_revision_id=None,
+        )
+        if completed is not None:
+            return completed
         if self._session.get(RecordingRow, request.recording_id) is not None:
             raise PersistenceIntegrityError(f"recording {request.recording_id} already exists")
         audio_asset = AudioAssetRepository(self._session).register(request.audio_asset)
@@ -143,7 +150,7 @@ class RecordingRepository:
 
         versions = self._resolve_versions(request.libraries)
         entries = self._resolve_entries(request.annotations, versions)
-        revision_id = uuid4()
+        revision_id = request.initial_revision_id
         created_at = datetime.now(UTC)
         snapshot = AnnotatedRecordingSnapshot(
             recording_id=request.recording_id,
@@ -179,6 +186,13 @@ class RecordingRepository:
         return load_snapshot(self._session, request.recording_id, revision_id)
 
     def save(self, request: SaveRecordingSnapshotRequest) -> AnnotatedRecordingSnapshot:
+        completed = self._load_idempotent_revision(
+            request.new_revision_id,
+            recording_id=request.recording_id,
+            parent_revision_id=request.expected_parent_revision_id,
+        )
+        if completed is not None:
+            return completed
         state = self._session.execute(
             select(RecordingRow, AudioAssetRow, RecordingRevisionRow)
             .join(AudioAssetRow, AudioAssetRow.id == RecordingRow.audio_asset_id)
@@ -198,7 +212,7 @@ class RecordingRepository:
 
         versions = self._resolve_versions(request.libraries)
         entries = self._resolve_entries(request.annotations, versions)
-        revision_id = uuid4()
+        revision_id = request.new_revision_id
         revision_number = 1 if parent is None else parent.revision_number + 1
         created_at = datetime.now(UTC)
         snapshot = AnnotatedRecordingSnapshot(
@@ -243,6 +257,25 @@ class RecordingRepository:
                 f"recording {request.recording_id} was saved concurrently"
             )
         return load_snapshot(self._session, request.recording_id, revision_id)
+
+    def _load_idempotent_revision(
+        self,
+        revision_id: UUID,
+        *,
+        recording_id: UUID,
+        parent_revision_id: UUID | None,
+    ) -> AnnotatedRecordingSnapshot | None:
+        revision = self._session.get(RecordingRevisionRow, revision_id)
+        if revision is None:
+            return None
+        if (
+            revision.recording_id != recording_id
+            or revision.parent_revision_id != parent_revision_id
+        ):
+            raise PersistenceIntegrityError(
+                f"revision ID {revision_id} is already bound to incompatible history"
+            )
+        return load_snapshot(self._session, recording_id, revision_id)
 
     def _resolve_versions(
         self, pins: tuple[PinnedLibraryVersion, ...]

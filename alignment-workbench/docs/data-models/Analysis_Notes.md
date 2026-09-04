@@ -1,8 +1,8 @@
 # Analysis Notes
 
-Status: Proposed
+**Status:** Proposed
 
-Scope: Analysis boundaries, sparse event output, producer adapters, and current-data migration
+**Scope:** Analysis boundaries, sparse event output, producer adapters, and legacy-data migration
 
 ## Analysis boundary
 
@@ -12,7 +12,7 @@ An annotation may retain an opaque `provenance_ref` so another subsystem can tra
 
 ## Producer responsibility
 
-An analysis producer translates external output into annotation-library entries and `SignalAnnotation` objects. Before publishing an annotation, it must resolve the intended semantic entry.
+An analysis producer translates external output into annotation-library entries and `SignalAnnotation` objects. Before publishing an annotation through the proposed application API, it must resolve the intended semantic entry.
 
 A producer may:
 
@@ -21,7 +21,7 @@ A producer may:
 - Publish a producer-specific library version.
 - Use a core unclassified entry when an event is not yet understood.
 
-The recording service validates concept pointers but does not decide which concept a producer should choose. Producers construct domain objects and call the application service; they do not write SQL directly.
+The domain and persistence layers validate concept pointers but do not decide which concept a producer should choose. Producers construct domain objects and will call the application layer; they do not write SQL directly.
 
 ## Sparse F0 events
 
@@ -77,9 +77,9 @@ Breath and silence detectors publish interval annotations. They do not fill ever
 
 A user selects a library entry, paints compatible geometry, adjusts attributes, and saves a new full recording revision. Unknown observations use core unclassified entries rather than forcing a premature classification.
 
-## Current-model migration notes
+## Legacy-model migration notes
 
-The current recording and audio infrastructure can be partially reused, but the existing `segments` table does not remain the canonical annotation model.
+The preserved legacy recording and audio data can be partially reused, but the legacy `segments` table does not become the canonical annotation model.
 
 Reusable concepts include:
 

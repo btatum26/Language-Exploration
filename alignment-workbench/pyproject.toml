@@ -5,6 +5,7 @@ description = "Signal-first audio annotation workbench"
 requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.16,<2",
+    "jsonschema>=4.25,<5",
     "psycopg[binary]>=3.2,<4",
     "pydantic>=2.11,<3",
     "python-dotenv>=1.1,<2",
@@ -16,6 +17,7 @@ dev = [
     "mypy>=1.16,<2",
     "pytest>=8.4,<9",
     "ruff>=0.12,<1",
+    "types-jsonschema>=4.25,<5",
 ]
 
 [tool.uv]

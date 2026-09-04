@@ -8,16 +8,16 @@
 The implemented flow is:
 
 ```text
-GUI / CLI
-    -> future interaction engine
+Future GUI / CLI
+    -> proposed application handlers and edit session
         -> application persistence protocols
             -> synchronous SQLAlchemy implementation
                 -> PostgreSQL
 ```
 
-The interaction engine is not part of this layer. It will own editing commands and use-case
-coordination. This layer owns short-lived database transactions, exact snapshot hydration,
-immutable revision insertion, and persistence error translation.
+The proposed application layer is not part of this implementation. It will own editing commands
+and use-case coordination. This layer owns short-lived database transactions, exact snapshot
+hydration, immutable revision insertion, and persistence error translation.
 
 Application code imports `AudioAsset`, `Speaker`, `Library`, `LibraryVersion`, `LibraryEntry`,
 `AnnotatedRecordingSnapshot`, and request models from `models.py`. It imports protocols, read
@@ -69,9 +69,10 @@ Loading a snapshot uses three bounded queries:
 2. Pinned library versions joined to their libraries in stored `position` order.
 3. Annotations joined to their exact entries, versions, and libraries in stored `position` order.
 
-Loading a workspace adds one query for every entry belonging to all pinned versions. It therefore
-uses four SELECT statements regardless of annotation or entry count. It avoids both N+1 loading
-and a Cartesian join between every annotation and every library entry.
+Loading a workspace adds at most one query for every entry belonging to all pinned versions. It
+uses three SELECT statements when no libraries are pinned and four when pins exist, regardless of
+annotation or entry count. It avoids both N+1 loading and a Cartesian join between every annotation
+and every library entry.
 
 Concept references are reconstructed as `namespace@version_label:entry_key`. Point, time interval,
 time-frequency box, and time-frequency polygon columns are mapped explicitly. Polygon vertices and
@@ -79,25 +80,29 @@ JSON attributes are preserved.
 
 ## Recording creation
 
-`CreateRecordingRequest` validates the complete initial state. One transaction registers or
-verifies the immutable audio asset, inserts the recording, resolves all pinned versions and
-concepts in bulk, inserts revision one, inserts ordered pins and annotations, and conditionally
-sets the recording head. A failure at any point rolls back the audio registration and the entire
-recording graph.
+`CreateRecordingRequest` validates the complete initial state and owns a stable
+`initial_revision_id`. One transaction registers or verifies the immutable audio asset, inserts the
+recording, resolves all pinned versions and concepts in bulk, inserts revision one with that ID,
+inserts ordered pins and annotations, and conditionally sets the recording head. A retry whose
+revision already exists for the same recording with a null parent returns that persisted snapshot.
+A failure at any point rolls back the audio registration and the entire recording graph.
 
 ## Immutable revision saves
 
-`SaveRecordingSnapshotRequest` carries complete editable state and an
+`SaveRecordingSnapshotRequest` carries complete editable state, a stable `new_revision_id`, and an
 `expected_parent_revision_id`. Saving:
 
-1. Reads the recording, immutable audio metadata, current head, and parent revision number.
-2. Rejects an already-stale expected parent.
-3. Resolves all pinned versions in one query.
-4. Resolves all referenced entries in one query and checks allowed geometry types.
-5. Constructs and validates the complete proposed `AnnotatedRecordingSnapshot`.
-6. Inserts a new revision, ordered pins, and ordered annotations without changing old rows.
-7. Advances `recordings.head_revision_id` with `IS NOT DISTINCT FROM` compare-and-swap semantics.
-8. Commits the complete transaction.
+1. Checks whether `new_revision_id` is already persisted.
+2. Returns that historical snapshot when it belongs to the same recording and expected parent, or
+   raises `PersistenceIntegrityError` when the ID is bound to incompatible history.
+3. Reads the recording, immutable audio metadata, current head, and parent revision number.
+4. Rejects an already-stale expected parent.
+5. Resolves all pinned versions and referenced entries in bounded bulk queries.
+6. Constructs and validates the complete proposed `AnnotatedRecordingSnapshot`.
+7. Inserts the supplied revision ID, ordered pins, and ordered annotations without changing old
+   rows.
+8. Advances `recordings.head_revision_id` with `IS NOT DISTINCT FROM` compare-and-swap semantics.
+9. Commits the complete transaction.
 
 A failed compare-and-swap raises `ConcurrentRevisionError`. Parent or revision-number uniqueness
 races are translated to the same error. The runtime performs no update or delete against immutable
@@ -123,8 +128,10 @@ Application code receives `RecordingNotFoundError`, `RevisionNotFoundError`,
 `PersistenceError` subtype. Raw SQLAlchemy and driver exceptions are chained as causes for
 debugging but never cross the public boundary directly.
 
-The later local recovery queue will catch `DatabaseUnavailableError`, persist a deterministic save
-request outside this package, and retry only after rechecking the expected parent. No recovery
+The later local recovery queue will catch `DatabaseUnavailableError` and persist the deterministic
+request, including its stable revision ID. Retrying the same request distinguishes an already
+committed operation from a different writer: the former returns the matching persisted revision,
+while a reused ID with another recording or parent raises `PersistenceIntegrityError`. No recovery
 queue is implemented here.
 
 ## Audio URI handling

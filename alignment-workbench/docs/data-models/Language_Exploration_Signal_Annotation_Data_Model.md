@@ -1,10 +1,10 @@
 # Language Exploration Signal Annotation Data Model
 
-Status: Proposed canonical data model
+**Status:** Implemented canonical domain model
 
-Scope: Source-of-truth representation and PostgreSQL persistence
+**Scope:** Source-of-truth representation independent of persistence infrastructure
 
-Primary use: A fully painted, signal-first representation of an immutable audio recording
+**Primary use:** A fully painted, signal-first representation of an immutable audio recording
 
 ## Overview
 
@@ -19,18 +19,19 @@ The model records the current painted state. It does not execute analysis, retai
 ## Documents
 
 - [Recording data model](Recording_Data_Model.md) describes recordings, annotations, geometry, and recording version history.
-- [Recording PostgreSQL schema](Recording_PostgreSQL_Schema.md) describes persistence for audio assets, recordings, revision snapshots, and annotations.
 - [Annotation library data model](Annotation_Library_Data_Model.md) describes reusable annotation meanings and immutable library version history.
-- [Annotation library PostgreSQL schema](Annotation_Library_PostgreSQL_Schema.md) describes persistence for libraries, versions, and entries.
 - [Analysis notes](Analysis_Notes.md) defines the analysis boundary, sparse event representation, producer integration, and current-data migration.
-- [Application interface](Application_Interface.md) defines snapshot interchange, save/read workflows, service boundaries, validation, and workbench behavior.
-- [Testing plan](Testing_Plan.md) defines unit, persistence, integration, and round-trip coverage.
 
 ## Supporting files
 
-- [Annotation library schema SQL](sql/annotation_library_schema.sql) contains the representative library DDL.
-- [Recording schema SQL](sql/recording_schema.sql) contains the representative recording and annotation DDL.
 - [Annotated recording snapshot example](examples/annotated_recording_snapshot.json) contains the complete JSON example.
+
+## Related documentation
+
+- [Application API](../application-api/Alignment_Workbench_Unified_Application_API.md) defines the proposed handlers and editing session.
+- [Persistence architecture](../persistence/Persistence_Architecture.md) defines implemented storage ownership.
+- [PostgreSQL schema](../persistence/PostgreSQL_Schema.md) documents the installed Alembic schema.
+- [Data model and persistence testing](../testing/Data_Model_and_Persistence_Testing.md) describes current automated coverage.
 
 ## Foundational invariants
 
@@ -45,4 +46,4 @@ The model records the current painted state. It does not execute analysis, retai
 - Analysis execution remains outside the source model.
 - History is linear and snapshot-based rather than diff-based; stale concurrent saves are rejected.
 - Deleting an annotation never destroys an older revision.
-- Linguistic hierarchies are optional interpretations, not the foundation of the data. 
+- Linguistic hierarchies are optional interpretations, not the foundation of the data.

@@ -1,8 +1,8 @@
 # Recording Data Model
 
-Status: Proposed
+**Status:** Implemented in `src/models.py` and the PostgreSQL persistence layer
 
-Scope: Stable recording identity, immutable saved revisions, and signal annotations
+**Scope:** Stable recording identity, immutable saved revisions, and signal annotations
 
 ## Purpose
 
@@ -44,7 +44,7 @@ Required properties are:
 
 - Stable ID
 - Lowercase hexadecimal SHA-256 of the original bytes
-- Logical or remote storage key
+- Nonempty logical `storage_uri`, normally `registry-audio://assets/<uuid>`
 - Media type, container, codec, or original extension when available
 - Sample rate
 - Channel count
@@ -157,9 +157,9 @@ Geometry models and `AnnotatedRecordingSnapshot` enforce:
 - Pinned namespace and version pairs are unique within the snapshot.
 - Every annotation's concept namespace and version are pinned by the snapshot.
 
-The application service enforces acoustic bounds against the Nyquist frequency, resolves the
-exact library entry, checks that the geometry type is allowed, and validates attributes against
-the entry's JSON Schema.
+The implemented persistence layer resolves the exact library entry, verifies its pinned version
+and content hash, and checks that the geometry type is allowed. Nyquist checks and entry-defined
+JSON Schema policy belong to the proposed application layer.
 
 The core model allows exact geometric duplicates, partial overlap, full containment, cross-category overlap, competing annotations, and unannotated gaps. Optional library rules may be stricter, but they do not become universal database constraints.
 
@@ -211,11 +211,12 @@ Restore does not move the head backward or delete later history. To restore revi
 
 ### Concurrent save behavior
 
-Every save request carries `expected_parent_revision_id`, which is the head revision loaded by
-the editor. The save transaction briefly locks the stable recording row and compares its current
-head with that expected parent. A mismatch rejects the request as stale without creating a
-revision. A match allocates the next revision number and updates the head atomically. The first
-save explicitly sends a null expected parent.
+Every save request carries a stable `new_revision_id` and the `expected_parent_revision_id` loaded
+by the editor. If the new ID already belongs to the same recording and parent, retry returns that
+committed revision. Incompatible ID reuse is an integrity error. Otherwise the save compares the
+current head with the expected parent; a mismatch rejects it as stale without creating a revision.
+A match allocates the next revision number and advances the head with compare-and-swap semantics.
+The initial create request likewise owns a stable `initial_revision_id` and uses a null parent.
 
 ## Deferred decisions
 

@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import and_, false, select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from application.errors import RecordingNotFoundError, RevisionNotFoundError
@@ -131,10 +131,6 @@ def load_recording(
             library_version_from_rows(version, entries_by_version[version.id])
             for _, version, _ in pin_rows
         )
-    elif include_library_entries:
-        # Preserve the four-query workspace contract even for a snapshot with no pins.
-        tuple(session.scalars(select(LibraryEntryRow).where(false())))
-
     return HydratedRecording(
         snapshot=snapshot,
         default_speaker=(speaker_from_row(speaker_row) if speaker_row is not None else None),
