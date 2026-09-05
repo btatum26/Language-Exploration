@@ -11,6 +11,7 @@
 | `tests/test_domain_models.py` | Strict immutable models, deterministic JSON, geometry, snapshots, and stable create/save revision IDs |
 | `tests/test_persistence_mappers.py` | Domain-to-row values and trusted row-to-domain hydration |
 | `tests/test_application_api.py` | Public handlers, edit sessions, validation, WAV storage, durable recovery, retries, and conflicts |
+| `tests/test_application_runtime.py` | Validated settings, explicit startup, sanitized failures, and idempotent shutdown |
 | `tests/database/test_snapshot_metadata.py` | ORM metadata, constraints, indexes, engine, and session configuration |
 | `tests/database/test_snapshot_postgresql.py` | Alembic lifecycle and PostgreSQL constraint behavior |
 | `tests/database/test_persistence_postgresql.py` | Store CRUD, bounded reads, ordered hydration, atomic creation/saves, retries, and real concurrent-save behavior |
@@ -44,6 +45,9 @@ The PostgreSQL persistence suite covers:
 - stale-parent rejection;
 - a synchronized two-connection race in which exactly one competing save succeeds;
 - atomic rollback and typed error translation.
+- one-query library discovery with latest-version entry counts;
+- recording discovery with optional speaker display names;
+- public audio import, discovery, verified open, and close through the PostgreSQL facade;
 
 ## Schema and runtime-role coverage
 

@@ -99,3 +99,19 @@ class RecoveryStorageError(WorkbenchError):
 
 class PendingRecoveryOperationError(WorkbenchError):
     """An operation must be resolved through RecoveryHandler before discarding state."""
+
+
+class SessionClosedError(WorkbenchError):
+    """An operation was attempted on a closed recording edit session."""
+
+
+class UnsavedChangesError(WorkbenchError):
+    """An edit session cannot close until changes are saved or explicitly discarded."""
+
+
+class WorkbenchConfigurationError(WorkbenchError):
+    """Application settings are missing or invalid."""
+
+
+class WorkbenchStartupError(WorkbenchError):
+    """Configured application dependencies could not be initialized or validated."""

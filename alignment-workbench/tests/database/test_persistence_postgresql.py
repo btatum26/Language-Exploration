@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import wave
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -18,6 +19,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from alembic import command
+from application import (
+    AudioAvailability,
+    CreateRecordingCommand,
+    FileRecoveryOutbox,
+    LocalAudioStorage,
+    create_workbench,
+)
 from application.errors import (
     AudioAssetNotFoundError,
     ConcurrentRevisionError,
@@ -337,8 +345,68 @@ def test_complete_recording_current_snapshot_and_workspace(
     summary = next(
         item for item in store.list_recordings() if item.recording_id == request.recording_id
     )
-    assert summary.audio_storage_uri == request.audio_asset.storage_uri
+    assert summary.audio_asset.storage_uri == request.audio_asset.storage_uri
     assert summary.revision_number == 1
+
+
+def test_public_discovery_import_and_open_use_postgresql(
+    persistence_store: StoreFixture,
+    tmp_path: Path,
+) -> None:
+    store = persistence_store.store
+    speaker = store.create_speaker(_speaker())
+    library, version = _publish_library(
+        store,
+        namespace=f"le.discovery.{uuid4().hex}",
+        entry_keys=("event", "boundary"),
+    )
+    source = tmp_path / "discovery.wav"
+    with wave.open(str(source), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(8_000)
+        output.writeframes(b"\x00\x00" * 800)
+    api = create_workbench(
+        persistence=store,
+        audio_storage=LocalAudioStorage(tmp_path / "audio"),
+        recovery_outbox=FileRecoveryOutbox(tmp_path / "recovery"),
+    )
+    recording_id = uuid4()
+
+    imported = api.import_recording(
+        CreateRecordingCommand(
+            recording_id=recording_id,
+            source_audio_path=source,
+            name="PostgreSQL discovery recording",
+            language="en",
+            default_speaker_ref=speaker.id,
+        )
+    )
+    managed_audio = imported.audio.local_path
+    imported.close()
+    recordings = api.list_recordings()
+    libraries = api.list_annotation_libraries()
+
+    recording = next(item for item in recordings if item.recording_id == recording_id)
+    listed_library = next(item for item in libraries if item.library_id == library.id)
+    assert source.is_file()
+    assert managed_audio.is_file()
+    assert recording.display_name == "PostgreSQL discovery recording"
+    assert recording.speaker_display_name == speaker.display_name
+    assert recording.audio_status is AudioAvailability.AVAILABLE
+    assert recording.revision_number == 1
+    assert type(recording).__module__ == "application.read_models"
+    assert not isinstance(recording, Session)
+    assert listed_library.latest_version_id == version.id
+    assert listed_library.latest_version_label == version.version_label
+    assert listed_library.entry_count == 2
+    assert type(listed_library).__module__ == "application.read_models"
+    assert not isinstance(listed_library, Session)
+
+    opened = api.open_recording(recording_id)
+    assert opened.recording_id == recording_id
+    assert opened.audio.local_path == managed_audio
+    opened.close()
 
 
 def test_historical_load_append_only_save_and_stale_editor_rejection(

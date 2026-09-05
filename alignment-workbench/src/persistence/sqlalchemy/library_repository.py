@@ -3,7 +3,7 @@
 from collections import defaultdict
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from application.errors import (
@@ -11,6 +11,7 @@ from application.errors import (
     LibraryVersionNotFoundError,
     PersistenceIntegrityError,
 )
+from application.read_models import AnnotationLibraryListItem
 from models import Library, LibraryVersion
 from persistence.sqlalchemy.mappers import (
     library_entry_row_values,
@@ -53,6 +54,63 @@ class LibraryRepository:
             )
         )
         return tuple(library_from_row(row) for row in rows)
+
+    def list_summaries(self) -> tuple[AnnotationLibraryListItem, ...]:
+        ranked_versions = select(
+            LibraryVersionRow.id.label("version_id"),
+            LibraryVersionRow.library_id.label("library_id"),
+            LibraryVersionRow.version_label.label("version_label"),
+            LibraryVersionRow.created_at.label("version_created_at"),
+            func.row_number()
+            .over(
+                partition_by=LibraryVersionRow.library_id,
+                order_by=(
+                    LibraryVersionRow.created_at.desc(),
+                    LibraryVersionRow.id.desc(),
+                ),
+            )
+            .label("version_rank"),
+        ).subquery()
+        entry_counts = (
+            select(
+                LibraryEntryRow.library_version_id.label("version_id"),
+                func.count().label("entry_count"),
+            )
+            .group_by(LibraryEntryRow.library_version_id)
+            .subquery()
+        )
+        rows = self._session.execute(
+            select(
+                AnnotationLibraryRow,
+                ranked_versions.c.version_id,
+                ranked_versions.c.version_label,
+                ranked_versions.c.version_created_at,
+                func.coalesce(entry_counts.c.entry_count, 0),
+            )
+            .outerjoin(
+                ranked_versions,
+                (ranked_versions.c.library_id == AnnotationLibraryRow.id)
+                & (ranked_versions.c.version_rank == 1),
+            )
+            .outerjoin(
+                entry_counts,
+                entry_counts.c.version_id == ranked_versions.c.version_id,
+            )
+            .order_by(AnnotationLibraryRow.name, AnnotationLibraryRow.id)
+        )
+        return tuple(
+            AnnotationLibraryListItem(
+                library_id=library.id,
+                namespace=library.namespace,
+                name=library.name,
+                description=library.description,
+                latest_version_id=version_id,
+                latest_version_label=version_label,
+                latest_version_created_at=version_created_at,
+                entry_count=int(entry_count),
+            )
+            for library, version_id, version_label, version_created_at, entry_count in rows
+        )
 
     def publish_version(self, version: LibraryVersion) -> LibraryVersion:
         if self._session.get(AnnotationLibraryRow, version.library_id) is None:

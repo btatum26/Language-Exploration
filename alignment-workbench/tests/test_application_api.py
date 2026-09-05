@@ -10,6 +10,8 @@ import pytest
 import application.validation as validation_module
 from application import (
     AnnotationQuery,
+    AudioAvailability,
+    AudioIntegrityError,
     AudioUnavailableError,
     ConceptNotFoundError,
     ConceptNotPinnedError,
@@ -28,7 +30,9 @@ from application import (
     RecoveryConflict,
     SaveConflict,
     Saved,
+    SessionClosedError,
     SyncState,
+    UnsavedChangesError,
     UnsupportedAudioError,
     create_workbench,
     library_content_sha256,
@@ -44,8 +48,9 @@ from application.errors import (
     SpeakerNotFoundError,
 )
 from application.read_models import (
+    AnnotationLibraryListItem,
+    RecordingCatalogRecord,
     RecordingRevisionSummary,
-    RecordingSummary,
     RecordingWorkspace,
 )
 from models import (
@@ -82,6 +87,7 @@ class MemoryPersistenceStore:
         self.calls: list[str] = []
         self.offline = False
         self.fail_after_commit_once = False
+        self.reject_create = False
 
     def _call(self, name: str) -> None:
         self.calls.append(name)
@@ -145,6 +151,31 @@ class MemoryPersistenceStore:
         self._require_online()
         return tuple(sorted(self.libraries.values(), key=lambda item: item.namespace))
 
+    def list_annotation_libraries(self) -> tuple[AnnotationLibraryListItem, ...]:
+        self._call("list_annotation_libraries")
+        self._require_online()
+        items: list[AnnotationLibraryListItem] = []
+        for library in self.libraries.values():
+            versions = sorted(
+                (version for version in self.versions.values() if version.library_id == library.id),
+                key=lambda item: (item.created_at, str(item.id)),
+                reverse=True,
+            )
+            latest = versions[0] if versions else None
+            items.append(
+                AnnotationLibraryListItem(
+                    library_id=library.id,
+                    namespace=library.namespace,
+                    name=library.name,
+                    description=library.description,
+                    latest_version_id=latest.id if latest is not None else None,
+                    latest_version_label=(latest.version_label if latest is not None else None),
+                    latest_version_created_at=(latest.created_at if latest is not None else None),
+                    entry_count=len(latest.entries) if latest is not None else 0,
+                )
+            )
+        return tuple(sorted(items, key=lambda item: (item.name, str(item.library_id))))
+
     def publish_library_version(self, version: LibraryVersion) -> LibraryVersion:
         self._call("publish_library_version")
         self._require_online()
@@ -169,7 +200,7 @@ class MemoryPersistenceStore:
             )
         )
 
-    def list_recordings(self, *, limit: int, offset: int) -> tuple[RecordingSummary, ...]:
+    def list_recordings(self, *, limit: int, offset: int) -> tuple[RecordingCatalogRecord, ...]:
         self._call("list_recordings")
         self._require_online()
         snapshots = [
@@ -177,13 +208,16 @@ class MemoryPersistenceStore:
         ]
         summaries = sorted(snapshots, key=lambda item: (item.name, str(item.recording_id)))
         return tuple(
-            RecordingSummary(
+            RecordingCatalogRecord(
                 recording_id=snapshot.recording_id,
                 head_revision_id=snapshot.revision.id,
                 name=snapshot.name,
-                language=snapshot.language,
-                audio_storage_uri=snapshot.audio_asset.storage_uri,
-                duration_seconds=snapshot.audio_asset.duration_seconds,
+                speaker_display_name=(
+                    self.speakers[snapshot.default_speaker_ref].display_name
+                    if snapshot.default_speaker_ref is not None
+                    else None
+                ),
+                audio_asset=snapshot.audio_asset,
                 revision_number=snapshot.revision.number,
                 revised_at=snapshot.revision.created_at,
             )
@@ -228,6 +262,8 @@ class MemoryPersistenceStore:
     ) -> AnnotatedRecordingSnapshot:
         self._call("create_recording")
         self._require_online()
+        if self.reject_create:
+            raise PersistenceIntegrityError("recording rejected")
         existing = self.snapshots.get(request.recording_id, {}).get(request.initial_revision_id)
         if existing is not None:
             return existing
@@ -474,6 +510,83 @@ def test_public_handlers_create_edit_save_and_reopen(
     assert len(api.recordings.list_revisions(recording_id)) == 2  # type: ignore[attr-defined]
     assert len(tuple((recovery_root / "applied").glob("*.json"))) == 2
     assert store.heads[recording_id] == result.snapshot.revision.id
+
+
+def test_discovery_returns_frozen_gui_dtos_with_local_audio_status(
+    application_system: tuple[object, MemoryPersistenceStore, Path, Path],
+) -> None:
+    api, _, source, _ = application_system
+    speaker = api.speakers.create(  # type: ignore[attr-defined]
+        Speaker(id=uuid4(), display_name="Discovery speaker")
+    )
+    version, _ = publish_test_library(api)
+    session = api.import_recording(  # type: ignore[attr-defined]
+        CreateRecordingCommand(
+            recording_id=uuid4(),
+            source_audio_path=source,
+            name="Discovery recording",
+            language="en",
+            default_speaker_ref=speaker.id,
+        )
+    )
+
+    recordings = api.list_recordings()  # type: ignore[attr-defined]
+    libraries = api.list_annotation_libraries()  # type: ignore[attr-defined]
+
+    assert len(recordings) == 1
+    assert recordings[0].display_name == "Discovery recording"
+    assert recordings[0].speaker_display_name == "Discovery speaker"
+    assert recordings[0].audio_status is AudioAvailability.AVAILABLE
+    assert recordings[0].current_revision_id == session.base_revision_id
+    assert type(recordings[0]).__module__ == "application.read_models"
+    assert libraries[0].latest_version_id == version.id
+    assert libraries[0].latest_version_label == version.version_label
+    assert libraries[0].entry_count == 1
+    assert type(libraries[0]).__module__ == "application.read_models"
+
+    session.audio.local_path.unlink()
+    assert api.list_recordings()[0].audio_status is AudioAvailability.MISSING  # type: ignore[attr-defined]
+
+
+def test_import_failure_discards_managed_copy_and_preserves_source(tmp_path: Path) -> None:
+    store = MemoryPersistenceStore()
+    store.reject_create = True
+    source = tmp_path / "source.wav"
+    write_wav(source)
+    audio_root = tmp_path / "audio"
+    recovery_root = tmp_path / "recovery"
+    api = create_workbench(
+        persistence=store,
+        audio_storage=LocalAudioStorage(audio_root),
+        recovery_outbox=FileRecoveryOutbox(recovery_root),
+    )
+
+    with pytest.raises(PersistenceIntegrityError, match="recording rejected"):
+        create_recording(api, source)
+
+    assert source.is_file()
+    assert tuple((audio_root / "assets").glob("*.wav")) == ()
+    assert len(tuple((recovery_root / "archive").glob("*.json"))) == 1
+
+
+def test_edit_session_requires_an_explicit_clean_close(
+    application_system: tuple[object, MemoryPersistenceStore, Path, Path],
+) -> None:
+    api, _, source, _ = application_system
+    session = create_recording(api, source)
+    managed_audio = session.audio.local_path  # type: ignore[attr-defined]
+    session.set_name("Changed")  # type: ignore[attr-defined]
+
+    with pytest.raises(UnsavedChangesError):
+        session.close()  # type: ignore[attr-defined]
+
+    assert isinstance(session.save(), Saved)  # type: ignore[attr-defined]
+    session.close()  # type: ignore[attr-defined]
+    session.close()  # type: ignore[attr-defined]
+    assert session.closed  # type: ignore[attr-defined]
+    assert managed_audio.is_file()
+    with pytest.raises(SessionClosedError):
+        session.set_name("Too late")  # type: ignore[attr-defined]
 
 
 def test_session_mutations_are_atomic_validated_and_database_free(
@@ -732,6 +845,17 @@ def test_open_reports_missing_audio_as_a_typed_error(
 
     with pytest.raises(AudioUnavailableError):
         api.recordings.open(session.recording_id)  # type: ignore[attr-defined]
+
+
+def test_open_verifies_managed_audio_hash(
+    application_system: tuple[object, MemoryPersistenceStore, Path, Path],
+) -> None:
+    api, _, source, _ = application_system
+    session = create_recording(api, source)
+    session.audio.local_path.write_bytes(b"changed")  # type: ignore[attr-defined]
+
+    with pytest.raises(AudioIntegrityError, match="SHA-256"):
+        api.open_recording(session.recording_id)  # type: ignore[attr-defined]
 
 
 def test_retry_all_applies_dependent_queued_saves_in_parent_order(

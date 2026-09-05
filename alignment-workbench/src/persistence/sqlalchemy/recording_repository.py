@@ -16,7 +16,11 @@ from application.errors import (
     PersistenceIntegrityError,
     RecordingNotFoundError,
 )
-from application.read_models import RecordingRevisionSummary, RecordingSummary, RecordingWorkspace
+from application.read_models import (
+    RecordingCatalogRecord,
+    RecordingRevisionSummary,
+    RecordingWorkspace,
+)
 from models import (
     AnnotatedRecordingSnapshot,
     CreateRecordingRequest,
@@ -41,6 +45,7 @@ from persistence.sqlalchemy.rows import (
     RecordingRevisionLibraryRow,
     RecordingRevisionRow,
     RecordingRow,
+    SpeakerRow,
 )
 
 
@@ -57,30 +62,30 @@ class RecordingRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def list(self, *, limit: int, offset: int) -> tuple[RecordingSummary, ...]:
+    def list(self, *, limit: int, offset: int) -> tuple[RecordingCatalogRecord, ...]:
         if limit < 1 or limit > 1000 or offset < 0:
             raise ValueError("limit must be 1..1000 and offset must be nonnegative")
         head = aliased(RecordingRevisionRow)
         rows = self._session.execute(
-            select(RecordingRow, head, AudioAssetRow)
+            select(RecordingRow, head, AudioAssetRow, SpeakerRow)
             .join(AudioAssetRow, AudioAssetRow.id == RecordingRow.audio_asset_id)
             .join(head, head.id == RecordingRow.head_revision_id)
+            .outerjoin(SpeakerRow, SpeakerRow.id == head.default_speaker_ref)
             .order_by(head.name, RecordingRow.id)
             .limit(limit)
             .offset(offset)
         )
         return tuple(
-            RecordingSummary(
+            RecordingCatalogRecord(
                 recording_id=recording.id,
                 head_revision_id=revision.id,
                 name=revision.name,
-                language=revision.language,
-                audio_storage_uri=audio.storage_uri,
-                duration_seconds=audio.frame_count / audio.sample_rate_hz,
+                speaker_display_name=(speaker.display_name if speaker is not None else None),
+                audio_asset=audio_asset_from_row(audio),
                 revision_number=revision.revision_number,
                 revised_at=revision.created_at,
             )
-            for recording, revision, audio in rows
+            for recording, revision, audio, speaker in rows
         )
 
     def load_snapshot(

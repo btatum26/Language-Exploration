@@ -17,6 +17,8 @@ class AudioStorageHandler(Protocol):
     def resolve(self, audio_asset: AudioAsset) -> ResolvedAudio: ...
 
     def verify(self, audio_asset: AudioAsset) -> AudioVerificationResult: ...
+
+    def discard(self, audio_asset: AudioAsset) -> None: ...
 ```
 
 ## Ingestion
@@ -39,12 +41,14 @@ Resolution:
 - validates the asset UUID encoded by the URI;
 - prevents path traversal;
 - confirms the resolved target is a regular file under the configured root;
-- does not hash the entire file during every normal open.
+- does not hash the entire file during catalog discovery.
 
-Full hashing belongs to ingestion and explicit `verify` or maintenance audits.
+Full hashing belongs to ingestion, recording open, explicit `verify`, or maintenance audits.
 
 `LocalAudioStorage` is the concrete implementation. The current decoder boundary accepts uncompressed PCM WAV input and reports `UnsupportedAudioError` for other formats or compressed WAV data.
 Both resolution and verification reject logical URIs or filesystem links that escape the configured storage root.
+
+`discard` is limited to compensating a failed import. It is idempotent for a missing target and refuses to remove a path outside the root or bytes whose hash no longer matches the staged asset. Ordinary edit-session close and application shutdown never call it.
 
 ## Immutability
 

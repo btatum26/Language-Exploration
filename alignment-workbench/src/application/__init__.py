@@ -43,9 +43,13 @@ from application.errors import (
     RecordingNotFoundError,
     RecoveryStorageError,
     RevisionNotFoundError,
+    SessionClosedError,
     SpeakerNotFoundError,
+    UnsavedChangesError,
     UnsupportedAudioError,
+    WorkbenchConfigurationError,
     WorkbenchError,
+    WorkbenchStartupError,
 )
 from application.handlers import LibraryHandler, RecordingHandler, RecoveryHandler, SpeakerHandler
 from application.persistence import (
@@ -56,19 +60,24 @@ from application.persistence import (
     SpeakerStore,
 )
 from application.read_models import (
+    AnnotationLibraryListItem,
+    AudioAvailability,
+    RecordingListItem,
     RecordingRevisionSummary,
-    RecordingSummary,
     RecordingWorkspace,
 )
 from application.recovery import FileRecoveryOutbox
+from application.runtime import WorkbenchApplication, WorkbenchSettings
 from application.validation import library_content_sha256
 from application.workbench import WorkbenchAPI, create_workbench
 
 __all__ = [
     "AnnotationNotFoundError",
+    "AnnotationLibraryListItem",
     "AnnotationQuery",
     "AudioAssetNotFoundError",
     "AudioAssetStore",
+    "AudioAvailability",
     "AudioIntegrityError",
     "AudioStorageHandler",
     "AudioUnavailableError",
@@ -99,9 +108,9 @@ __all__ = [
     "RecordingEditSession",
     "RecordingHandler",
     "RecordingNotFoundError",
+    "RecordingListItem",
     "RecordingRevisionSummary",
     "RecordingStore",
-    "RecordingSummary",
     "RecordingWorkspace",
     "RecoveryApplied",
     "RecoveryConflict",
@@ -117,11 +126,17 @@ __all__ = [
     "Saved",
     "SpeakerHandler",
     "SpeakerNotFoundError",
+    "SessionClosedError",
     "SpeakerStore",
     "SyncState",
     "UnsupportedAudioError",
+    "UnsavedChangesError",
+    "WorkbenchApplication",
     "WorkbenchAPI",
+    "WorkbenchConfigurationError",
     "WorkbenchError",
+    "WorkbenchSettings",
+    "WorkbenchStartupError",
     "create_workbench",
     "library_content_sha256",
 ]

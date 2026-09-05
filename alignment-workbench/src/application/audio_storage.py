@@ -143,6 +143,29 @@ class LocalAudioStorage:
             actual_sha256=actual_sha256,
         )
 
+    def discard(self, audio_asset: AudioAsset) -> None:
+        """Remove a failed import only when its bytes still match the staged asset."""
+
+        target = self._target_for_asset(audio_asset)
+        try:
+            resolved = target.resolve(strict=True)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise AudioUnavailableError(f"could not resolve stored audio {audio_asset.id}") from exc
+        if not resolved.is_relative_to(self._assets_root) or not resolved.is_file():
+            raise AudioIntegrityError(
+                f"refusing to discard audio asset {audio_asset.id} outside the storage root"
+            )
+        if self._sha256(resolved) != audio_asset.sha256:
+            raise AudioIntegrityError(
+                f"refusing to discard audio asset {audio_asset.id} with changed bytes"
+            )
+        try:
+            resolved.unlink()
+        except OSError as exc:
+            raise AudioUnavailableError(f"could not discard audio asset {audio_asset.id}") from exc
+
     def _target_for_asset(self, audio_asset: AudioAsset) -> Path:
         parsed = urlsplit(audio_asset.storage_uri)
         expected_path = f"/{audio_asset.id}"

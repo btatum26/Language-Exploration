@@ -1,10 +1,13 @@
 # System Architecture
 
-**Status:** Domain, synchronous application API, local audio storage, recovery, and persistence implemented
+**Status:** Runnable lifecycle, synchronous application API, local audio storage, recovery, and persistence implemented
 
 ## Current system boundary
 
 ```text
+WorkbenchApplication
+       |
+       v
 WorkbenchAPI and RecordingEditSession
               |
               v
@@ -20,7 +23,9 @@ SqlAlchemyPersistence  Local WAV storage  Recovery files
 PostgreSQL registry_align schema
 ```
 
-The current checkout contains the portable model, synchronous application API, in-memory editing session, immutable WAV storage, durable recovery outbox, and synchronous PostgreSQL persistence. It does not contain a Qt GUI, playback engine, CLI presentation layer, or analysis runner.
+`WorkbenchApplication` is the process composition root. Creating it is configuration-only. `start()` constructs the owned PostgreSQL engine/session factory, local audio storage, recovery outbox, persistence adapter, and one `WorkbenchAPI`; it then validates the database through harmless recording and library reads. `shutdown()` invalidates the exposed API, closes the persistence facade, and disposes the connection pool. Startup and shutdown are idempotent, and the application supports `with` lifecycle use.
+
+The current checkout contains the portable model, synchronous application API, in-memory editing session, immutable WAV storage, durable recovery outbox, synchronous PostgreSQL persistence, and a small executable smoke interface. It does not contain a Qt GUI, playback engine, or analysis runner.
 
 `LocalAudioStorage` ingests, resolves, and verifies PCM WAV assets below one configured root. It uses `registry-audio://assets/<uuid>` as the stable logical URI.
 

@@ -34,6 +34,8 @@ from application.errors import (
     PersistenceError,
     PersistenceIntegrityError,
     RecoveryStorageError,
+    SessionClosedError,
+    UnsavedChangesError,
     WorkbenchError,
 )
 from application.persistence import PersistenceStore
@@ -118,6 +120,7 @@ class RecordingEditSession:
         self._redo: list[_EditableState] = []
         self._sync_state = sync_state
         self._pending_operation_id = pending_operation_id
+        self._closed = False
 
     @classmethod
     def from_workspace(
@@ -200,7 +203,25 @@ class RecordingEditSession:
     def can_redo(self) -> bool:
         return bool(self._redo)
 
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def close(self, *, discard_unsaved_changes: bool = False) -> None:
+        if self._closed:
+            return
+        if self.dirty and not discard_unsaved_changes:
+            raise UnsavedChangesError(
+                "recording has unsaved changes; save or explicitly discard them before closing"
+            )
+        if discard_unsaved_changes:
+            self._state = self._checkpoint
+        self._undo.clear()
+        self._redo.clear()
+        self._closed = True
+
     def set_name(self, name: str) -> None:
+        self._require_open()
         value = _NONEMPTY_STRING.validate_python(name)
         self._mutate(
             _EditableState(
@@ -215,6 +236,7 @@ class RecordingEditSession:
         )
 
     def set_language(self, language: str) -> None:
+        self._require_open()
         value = _NONEMPTY_STRING.validate_python(language)
         self._mutate(
             _EditableState(
@@ -229,6 +251,7 @@ class RecordingEditSession:
         )
 
     def set_default_speaker(self, speaker_id: UUID | None) -> None:
+        self._require_open()
         self._mutate(
             _EditableState(
                 name=self.name,
@@ -251,6 +274,7 @@ class RecordingEditSession:
         note: str | None = None,
         provenance_ref: str | None = None,
     ) -> SignalAnnotation:
+        self._require_open()
         annotation = SignalAnnotation(
             id=uuid4(),
             concept_ref=concept_ref,
@@ -270,6 +294,7 @@ class RecordingEditSession:
         self,
         annotations: Iterable[SignalAnnotation],
     ) -> tuple[SignalAnnotation, ...]:
+        self._require_open()
         additions = tuple(annotations)
         addition_ids: set[UUID] = set()
         for annotation in additions:
@@ -299,6 +324,7 @@ class RecordingEditSession:
         return additions
 
     def get_annotation(self, annotation_id: UUID) -> SignalAnnotation:
+        self._require_open()
         try:
             return self._state.annotations_by_id[annotation_id]
         except KeyError as exc:
@@ -309,6 +335,7 @@ class RecordingEditSession:
         annotation_id: UUID,
         replacement: SignalAnnotation,
     ) -> SignalAnnotation:
+        self._require_open()
         if replacement.id != annotation_id:
             raise WorkbenchError("replacement annotation must preserve the target annotation ID")
         current = self.get_annotation(annotation_id)
@@ -339,6 +366,7 @@ class RecordingEditSession:
         raise PersistenceIntegrityError("annotation index and ordered annotations diverged")
 
     def remove_annotation(self, annotation_id: UUID) -> SignalAnnotation:
+        self._require_open()
         removed = self.get_annotation(annotation_id)
         annotations = list(self.annotations)
         for index, annotation in enumerate(annotations):
@@ -361,17 +389,21 @@ class RecordingEditSession:
         raise PersistenceIntegrityError("annotation index and ordered annotations diverged")
 
     def find_annotations(self, query: AnnotationQuery) -> tuple[SignalAnnotation, ...]:
+        self._require_open()
         return tuple(
             annotation for annotation in self.annotations if self._matches_query(annotation, query)
         )
 
     def list_available_concepts(self) -> tuple[LibraryEntry, ...]:
+        self._require_open()
         return self._state.validation.entries
 
     def resolve_concept(self, concept_ref: ConceptRef) -> LibraryEntry:
+        self._require_open()
         return self._state.validation.resolve(concept_ref)
 
     def pin_library_version(self, version: LibraryVersion) -> None:
+        self._require_open()
         namespace = self._library_catalog.namespace_for(version)
         require_library_content_hash(version)
         pin = pin_for_version(version, namespace)
@@ -396,6 +428,7 @@ class RecordingEditSession:
         )
 
     def unpin_library_version(self, namespace: str, version: str) -> None:
+        self._require_open()
         index = next(
             (
                 index
@@ -432,6 +465,7 @@ class RecordingEditSession:
         )
 
     def undo(self) -> bool:
+        self._require_open()
         if not self._undo:
             return False
         self._redo.append(self._state)
@@ -439,6 +473,7 @@ class RecordingEditSession:
         return True
 
     def redo(self) -> bool:
+        self._require_open()
         if not self._redo:
             return False
         self._undo.append(self._state)
@@ -446,16 +481,20 @@ class RecordingEditSession:
         return True
 
     def clear_edit_history(self) -> None:
+        self._require_open()
         self._undo.clear()
         self._redo.clear()
 
     def list_revisions(self) -> tuple[RecordingRevisionSummary, ...]:
+        self._require_open()
         return self._persistence.list_recording_revisions(self.recording_id)
 
     def load_revision(self, revision_id: UUID) -> AnnotatedRecordingSnapshot:
+        self._require_open()
         return self._persistence.load_snapshot(self.recording_id, revision_id)
 
     def restore_revision(self, revision_id: UUID) -> None:
+        self._require_open()
         snapshot = self.load_revision(revision_id)
         self._require_same_audio(snapshot)
         versions = self._resolve_versions(tuple(snapshot.libraries))
@@ -473,6 +512,7 @@ class RecordingEditSession:
         )
 
     def reload(self) -> None:
+        self._require_open()
         self._require_recovery_decision()
         workspace = self._persistence.load_workspace(self.recording_id)
         audio = self._audio_storage.resolve(workspace.snapshot.audio_asset)
@@ -493,6 +533,7 @@ class RecordingEditSession:
         self._sync_state = SyncState.SYNCED
 
     def discard_unsaved_changes(self) -> None:
+        self._require_open()
         self._require_recovery_decision()
         self._state = self._checkpoint
         self.clear_edit_history()
@@ -503,6 +544,7 @@ class RecordingEditSession:
         author: str | None = None,
         message: str | None = None,
     ) -> SaveResult:
+        self._require_open()
         pending, conflicts = self._active_recovery_operations()
         if self._sync_state is SyncState.CONFLICT or conflicts:
             if conflicts:
@@ -580,6 +622,10 @@ class RecordingEditSession:
         self._checkpoint = self._state
         self._sync_state = SyncState.PENDING
         self._pending_operation_id = operation_id
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise SessionClosedError(f"recording edit session {self.recording_id} is closed")
 
     def _mutate(self, state: _EditableState) -> None:
         if state == self._state:

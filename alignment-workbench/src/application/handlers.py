@@ -14,10 +14,13 @@ from application.contracts import (
     RecoveryEnvelope,
     RecoveryOutbox,
     RecoveryResult,
+    ResolvedAudio,
     SyncState,
 )
 from application.edit_session import RecordingEditSession
 from application.errors import (
+    AudioIntegrityError,
+    AudioUnavailableError,
     ConcurrentRevisionError,
     DatabaseUnavailableError,
     InvalidRecoveryEnvelopeError,
@@ -29,7 +32,12 @@ from application.errors import (
     WorkbenchError,
 )
 from application.persistence import PersistenceStore
-from application.read_models import RecordingRevisionSummary, RecordingSummary
+from application.read_models import (
+    AnnotationLibraryListItem,
+    AudioAvailability,
+    RecordingListItem,
+    RecordingRevisionSummary,
+)
 from application.validation import (
     LibraryCatalog,
     bind_library_versions,
@@ -38,6 +46,7 @@ from application.validation import (
 )
 from models import (
     AnnotatedRecordingSnapshot,
+    AudioAsset,
     CreateRecordingRequest,
     Library,
     LibraryVersion,
@@ -57,6 +66,9 @@ class LibraryHandler:
         for library in libraries:
             self._catalog.remember_library(library)
         return libraries
+
+    def list_items(self) -> tuple[AnnotationLibraryListItem, ...]:
+        return self._persistence.list_annotation_libraries()
 
     def get(self, library_id: UUID) -> Library:
         library = self._persistence.get_library(library_id)
@@ -162,73 +174,97 @@ class RecordingHandler:
         *,
         limit: int = 100,
         offset: int = 0,
-    ) -> tuple[RecordingSummary, ...]:
-        return self._persistence.list_recordings(limit=limit, offset=offset)
+    ) -> tuple[RecordingListItem, ...]:
+        records = self._persistence.list_recordings(limit=limit, offset=offset)
+        return tuple(
+            RecordingListItem(
+                recording_id=record.recording_id,
+                display_name=record.name,
+                speaker_display_name=record.speaker_display_name,
+                duration_seconds=record.audio_asset.duration_seconds,
+                current_revision_id=record.head_revision_id,
+                revision_number=record.revision_number,
+                modified_at=record.revised_at,
+                audio_status=self._audio_availability(record.audio_asset),
+            )
+            for record in records
+        )
 
     def create(self, command: CreateRecordingCommand) -> RecordingEditSession:
         audio_asset = self._audio_storage.ingest(
             command.source_audio_path,
             asset_id=uuid4(),
         )
-        versions = self._libraries.resolve_pins(command.libraries)
-        bindings = bind_library_versions(
-            command.libraries,
-            versions,
-            self._library_catalog,
-        )
-        validation_context = validate_annotations(
-            command.annotations,
-            audio_asset=audio_asset,
-            bindings=bindings,
-        )
-        request = CreateRecordingRequest(
-            recording_id=command.recording_id,
-            initial_revision_id=command.initial_revision_id,
-            audio_asset=audio_asset,
-            name=command.name,
-            default_speaker_ref=command.default_speaker_ref,
-            language=command.language,
-            author=command.author,
-            message=command.message,
-            libraries=command.libraries,
-            annotations=command.annotations,
-        )
-        operation_id = uuid4()
-        envelope = RecoveryEnvelope(
-            operation_id=operation_id,
-            operation_kind="create_recording",
-            created_at=datetime.now(UTC),
-            request=request,
-        )
-        self._recovery_outbox.enqueue(envelope)
-        sync_state = SyncState.SYNCED
-        pending_operation_id: UUID | None = None
+        audio_is_referenced_or_recoverable = False
         try:
-            snapshot = self._persistence.create_recording(request)
-        except DatabaseUnavailableError:
-            snapshot = self._pending_creation_snapshot(request)
-            sync_state = SyncState.PENDING
-            pending_operation_id = operation_id
-        except Exception:
-            self._archive_best_effort(operation_id)
-            raise
-        else:
-            self._mark_applied_best_effort(operation_id)
+            resolved_audio = self._verified_audio(audio_asset)
+            versions = self._libraries.resolve_pins(command.libraries)
+            bindings = bind_library_versions(
+                command.libraries,
+                versions,
+                self._library_catalog,
+            )
+            validation_context = validate_annotations(
+                command.annotations,
+                audio_asset=audio_asset,
+                bindings=bindings,
+            )
+            request = CreateRecordingRequest(
+                recording_id=command.recording_id,
+                initial_revision_id=command.initial_revision_id,
+                audio_asset=audio_asset,
+                name=command.name,
+                default_speaker_ref=command.default_speaker_ref,
+                language=command.language,
+                author=command.author,
+                message=command.message,
+                libraries=command.libraries,
+                annotations=command.annotations,
+            )
+            operation_id = uuid4()
+            envelope = RecoveryEnvelope(
+                operation_id=operation_id,
+                operation_kind="create_recording",
+                created_at=datetime.now(UTC),
+                request=request,
+            )
+            self._recovery_outbox.enqueue(envelope)
+            sync_state = SyncState.SYNCED
+            pending_operation_id: UUID | None = None
+            try:
+                snapshot = self._persistence.create_recording(request)
+            except DatabaseUnavailableError:
+                snapshot = self._pending_creation_snapshot(request)
+                sync_state = SyncState.PENDING
+                pending_operation_id = operation_id
+                audio_is_referenced_or_recoverable = True
+            except Exception:
+                self._archive_best_effort(operation_id)
+                raise
+            else:
+                audio_is_referenced_or_recoverable = True
+                self._mark_applied_best_effort(operation_id)
 
-        resolved_audio = self._audio_storage.resolve(snapshot.audio_asset)
-        return RecordingEditSession(
-            snapshot=snapshot,
-            audio=resolved_audio,
-            bindings=bindings,
-            persistence=self._persistence,
-            audio_storage=self._audio_storage,
-            recovery_outbox=self._recovery_outbox,
-            library_catalog=self._library_catalog,
-            resolve_versions=self._libraries.resolve_pins,
-            validation_context=validation_context,
-            sync_state=sync_state,
-            pending_operation_id=pending_operation_id,
-        )
+            return RecordingEditSession(
+                snapshot=snapshot,
+                audio=resolved_audio,
+                bindings=bindings,
+                persistence=self._persistence,
+                audio_storage=self._audio_storage,
+                recovery_outbox=self._recovery_outbox,
+                library_catalog=self._library_catalog,
+                resolve_versions=self._libraries.resolve_pins,
+                validation_context=validation_context,
+                sync_state=sync_state,
+                pending_operation_id=pending_operation_id,
+            )
+        except Exception as exc:
+            if not audio_is_referenced_or_recoverable:
+                try:
+                    self._audio_storage.discard(audio_asset)
+                except WorkbenchError as cleanup_error:
+                    exc.add_note(f"managed audio cleanup also failed: {cleanup_error}")
+            raise
 
     def open(self, recording_id: UUID) -> RecordingEditSession:
         active = next(
@@ -247,7 +283,7 @@ class RecordingHandler:
                 f"recording {recording_id}"
             )
         workspace = self._persistence.load_workspace(recording_id)
-        audio = self._audio_storage.resolve(workspace.snapshot.audio_asset)
+        audio = self._verified_audio(workspace.snapshot.audio_asset)
         return RecordingEditSession.from_workspace(
             workspace,
             audio=audio,
@@ -304,6 +340,24 @@ class RecordingHandler:
             self._recovery_outbox.archive(operation_id)
         except WorkbenchError:
             pass
+
+    def _audio_availability(self, audio_asset: AudioAsset) -> AudioAvailability:
+        try:
+            self._audio_storage.resolve(audio_asset)
+        except AudioUnavailableError:
+            return AudioAvailability.MISSING
+        except WorkbenchError:
+            return AudioAvailability.INVALID
+        return AudioAvailability.AVAILABLE
+
+    def _verified_audio(self, audio_asset: AudioAsset) -> ResolvedAudio:
+        verification = self._audio_storage.verify(audio_asset)
+        asset_id = verification.asset.id
+        if not verification.exists or verification.local_path is None:
+            raise AudioUnavailableError(f"audio asset {asset_id} is unavailable")
+        if not verification.hash_matches:
+            raise AudioIntegrityError(f"audio asset {asset_id} failed SHA-256 verification")
+        return ResolvedAudio(asset=verification.asset, local_path=verification.local_path)
 
 
 class RecoveryHandler:

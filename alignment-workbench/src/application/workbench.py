@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from application.contracts import AudioStorageHandler, RecoveryOutbox
+from uuid import UUID
+
+from application.contracts import AudioStorageHandler, CreateRecordingCommand, RecoveryOutbox
+from application.edit_session import RecordingEditSession
 from application.handlers import (
     LibraryHandler,
     RecordingHandler,
@@ -10,6 +13,7 @@ from application.handlers import (
     SpeakerHandler,
 )
 from application.persistence import PersistenceStore
+from application.read_models import AnnotationLibraryListItem, RecordingListItem
 from application.validation import LibraryCatalog
 
 
@@ -51,6 +55,23 @@ class WorkbenchAPI:
     @property
     def recovery(self) -> RecoveryHandler:
         return self._recovery
+
+    def list_recordings(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[RecordingListItem, ...]:
+        return self._recordings.list(limit=limit, offset=offset)
+
+    def list_annotation_libraries(self) -> tuple[AnnotationLibraryListItem, ...]:
+        return self._libraries.list_items()
+
+    def import_recording(self, command: CreateRecordingCommand) -> RecordingEditSession:
+        return self._recordings.create(command)
+
+    def open_recording(self, recording_id: UUID) -> RecordingEditSession:
+        return self._recordings.open(recording_id)
 
 
 def create_workbench(

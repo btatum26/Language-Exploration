@@ -35,7 +35,7 @@ The focused protocols are:
   snapshots, load a workspace, list revision history, and append a snapshot revision.
 - `PersistenceStore`: a convenience composition of the four focused protocols.
 
-`RecordingSummary`, `RecordingRevisionSummary`, and `RecordingWorkspace` are frozen read models.
+`RecordingCatalogRecord`, `AnnotationLibraryListItem`, `RecordingRevisionSummary`, and `RecordingWorkspace` are frozen read models. The recording handler converts the internal catalog record into a smaller `RecordingListItem` after checking local audio availability.
 A workspace contains the exact snapshot, its resolved optional speaker, and complete pinned
 `LibraryVersion` models in pin order. Every library version contains its entries in stored order.
 

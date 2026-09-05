@@ -4,8 +4,9 @@ from typing import Protocol
 from uuid import UUID
 
 from application.read_models import (
+    AnnotationLibraryListItem,
+    RecordingCatalogRecord,
     RecordingRevisionSummary,
-    RecordingSummary,
     RecordingWorkspace,
 )
 from models import (
@@ -40,6 +41,8 @@ class LibraryStore(Protocol):
 
     def list_libraries(self) -> tuple[Library, ...]: ...
 
+    def list_annotation_libraries(self) -> tuple[AnnotationLibraryListItem, ...]: ...
+
     def publish_library_version(self, version: LibraryVersion) -> LibraryVersion: ...
 
     def get_library_version(self, library_version_id: UUID) -> LibraryVersion: ...
@@ -50,7 +53,7 @@ class LibraryStore(Protocol):
 class RecordingStore(Protocol):
     def list_recordings(
         self, *, limit: int = 100, offset: int = 0
-    ) -> tuple[RecordingSummary, ...]: ...
+    ) -> tuple[RecordingCatalogRecord, ...]: ...
 
     def load_snapshot(
         self,

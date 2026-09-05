@@ -23,7 +23,12 @@ from application.errors import (
     PersistenceError,
     PersistenceIntegrityError,
 )
-from application.read_models import RecordingRevisionSummary, RecordingSummary, RecordingWorkspace
+from application.read_models import (
+    AnnotationLibraryListItem,
+    RecordingCatalogRecord,
+    RecordingRevisionSummary,
+    RecordingWorkspace,
+)
 from models import (
     AnnotatedRecordingSnapshot,
     AudioAsset,
@@ -54,6 +59,7 @@ class SqlAlchemyPersistence:
     ) -> None:
         self._session_factory = session_factory
         self._owned_engine = owned_engine
+        self._closed = False
 
     def __enter__(self) -> SqlAlchemyPersistence:
         return self
@@ -67,6 +73,9 @@ class SqlAlchemyPersistence:
         self.close()
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         if self._owned_engine is not None:
             self._owned_engine.dispose()
             self._owned_engine = None
@@ -95,6 +104,9 @@ class SqlAlchemyPersistence:
     def list_libraries(self) -> tuple[Library, ...]:
         return self._run(lambda session: LibraryRepository(session).list())
 
+    def list_annotation_libraries(self) -> tuple[AnnotationLibraryListItem, ...]:
+        return self._run(lambda session: LibraryRepository(session).list_summaries())
+
     def publish_library_version(self, version: LibraryVersion) -> LibraryVersion:
         return self._run(lambda session: LibraryRepository(session).publish_version(version))
 
@@ -104,7 +116,9 @@ class SqlAlchemyPersistence:
     def list_library_versions(self, library_id: UUID) -> tuple[LibraryVersion, ...]:
         return self._run(lambda session: LibraryRepository(session).list_versions(library_id))
 
-    def list_recordings(self, *, limit: int = 100, offset: int = 0) -> tuple[RecordingSummary, ...]:
+    def list_recordings(
+        self, *, limit: int = 100, offset: int = 0
+    ) -> tuple[RecordingCatalogRecord, ...]:
         return self._run(
             lambda session: RecordingRepository(session).list(limit=limit, offset=offset)
         )
@@ -137,6 +151,8 @@ class SqlAlchemyPersistence:
         return self._run(lambda session: RecordingRepository(session).list_revisions(recording_id))
 
     def _run(self, operation: Callable[[Session], T]) -> T:
+        if self._closed:
+            raise PersistenceError("persistence store is closed")
         try:
             with self._session_factory() as session:
                 with session.begin():

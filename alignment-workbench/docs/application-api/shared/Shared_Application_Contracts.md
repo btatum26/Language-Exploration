@@ -26,7 +26,7 @@ The API is an internal synchronous Python API. It is not an HTTP or REST API. A 
 
 ## Design principles
 
-1. `WorkbenchAPI` is the public entry point.
+1. `WorkbenchApplication` is the configured process lifecycle; its started `WorkbenchAPI` is the public behavior entry point.
 2. `RecordingEditSession` is the public interface for meaningful work on one recording.
 3. SQLAlchemy rows, sessions, expressions, and database-specific types never cross the application boundary.
 4. A recording edit session is in-memory state. It does not hold an open database transaction.
@@ -59,6 +59,19 @@ RecordingEditSession
 ```
 
 Public callers use `WorkbenchAPI` and `RecordingEditSession`. The persistence, audio-storage, and recovery implementations are injected infrastructure dependencies.
+
+`WorkbenchApplication` keeps configuration, startup, API construction, and shutdown distinct. `WorkbenchSettings.from_environment()` reads the project `.env` plus process overrides. Creating the application does no I/O; `start()` validates PostgreSQL and local roots; `shutdown()` is idempotent and disposes the owned connection pool.
+
+The first GUI discovery surface is also available directly on both the lifecycle owner and API facade:
+
+```python
+list_recordings(limit=100, offset=0) -> tuple[RecordingListItem, ...]
+list_annotation_libraries() -> tuple[AnnotationLibraryListItem, ...]
+import_recording(command) -> RecordingEditSession
+open_recording(recording_id) -> RecordingEditSession
+```
+
+The list-item dataclasses are frozen and contain only application/domain values. Recording availability combines authoritative PostgreSQL metadata with a cheap local-path resolution check; full hashing occurs on import, explicit verification, and open.
 
 ## Public handler map
 
@@ -234,6 +247,10 @@ class UnsupportedAudioError(WorkbenchError): ...
 class InvalidRecoveryEnvelopeError(WorkbenchError): ...
 class RecoveryStorageError(WorkbenchError): ...
 class PendingRecoveryOperationError(WorkbenchError): ...
+class SessionClosedError(WorkbenchError): ...
+class UnsavedChangesError(WorkbenchError): ...
+class WorkbenchConfigurationError(WorkbenchError): ...
+class WorkbenchStartupError(WorkbenchError): ...
 ```
 
 Raw SQLAlchemy, psycopg, filesystem, decoder, and JSON parsing exceptions must not escape through the public handler API.

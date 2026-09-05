@@ -9,6 +9,8 @@
 
 ```python
 class LibraryHandler(Protocol):
+    def list_items(self) -> tuple[AnnotationLibraryListItem, ...]: ...
+
     def list(self) -> tuple[Library, ...]: ...
 
     def get(self, library_id: UUID) -> Library: ...
@@ -46,5 +48,7 @@ Rules:
 - Version labels and content hashes are unique within a library.
 - `publish_version` verifies the deterministic content hash. Callers may use the exported `library_content_sha256` helper while constructing a version.
 - No update or delete methods are exposed in the initial API.
+
+`list_items` is the first GUI discovery projection. One PostgreSQL query returns each library in deterministic name/ID order with its newest version by creation time and ID, that version's entry count, and no ORM objects. A library without a published version reports null latest-version fields and an entry count of zero.
 
 The handler may use the existing `LibraryStore` persistence protocol. `RecordingEditSession.pin_library_version` receives complete published versions from this handler.

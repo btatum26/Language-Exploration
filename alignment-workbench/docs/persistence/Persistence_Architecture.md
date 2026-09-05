@@ -15,7 +15,9 @@ src/models.py
     immutable domain models and create/save requests
 
 src/application/
-    workbench.py      composition root
+    runtime.py        validated settings and process lifecycle
+    workbench.py      public API composition
+    cli.py            executable lifecycle/import smoke path
     handlers.py       public application handlers
     edit_session.py   in-memory recording editing
     contracts.py      commands, results, and infrastructure ports
@@ -23,7 +25,7 @@ src/application/
     audio_storage.py  immutable local WAV storage
     recovery.py       durable filesystem recovery outbox
     persistence.py    framework-free store protocols
-    read_models.py    frozen query projections
+    read_models.py    frozen persistence and GUI discovery projections
     errors.py         stable application exceptions
 
 src/persistence/
@@ -73,7 +75,7 @@ The [database foundation](PostgreSQL_Database_Foundation.md) owns configuration,
 
 ## Remaining integration points
 
-GUI, playback, CLI presentation, and external analysis integrations are not implemented in this checkout. They consume the [application API](../application-api/Alignment_Workbench_Unified_Application_API.md) without writing SQL or recovery files directly.
+GUI, playback, full CLI presentation, and external analysis integrations are not implemented in this checkout. They consume the [application API](../application-api/Alignment_Workbench_Unified_Application_API.md) without writing SQL or recovery files directly. The existing executable is limited to lifecycle, discovery, and import smoke verification.
 
 ## Exclusions
 

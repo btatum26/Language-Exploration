@@ -31,5 +31,11 @@ The contract tests cover:
 19. A restarted application refuses to open older PostgreSQL state while recovery is active.
 20. Existing conflicts continue to block pending children across repeated `retry_all` calls.
 21. Concept, compiled JSON Schema, and annotation-ID indexes are reused across ordinary edits.
+22. Recording and library discovery return frozen application DTOs with deterministic ordering.
+23. Recording discovery reports cheap local audio availability, while open verifies the full hash.
+24. A rejected import preserves the source and removes its matching unreferenced managed copy.
+25. Clean session close is idempotent, preserves managed audio, and rejects later operations.
+26. Unsaved changes require save or explicit discard before session close.
+27. Application startup validates dependencies, sanitizes failures, and disposes resources exactly once.
 
 Implemented lower-level coverage is documented in [Data model and persistence testing](../../testing/Data_Model_and_Persistence_Testing.md).
