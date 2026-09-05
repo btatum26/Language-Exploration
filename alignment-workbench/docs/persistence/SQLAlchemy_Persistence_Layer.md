@@ -59,7 +59,9 @@ repositories never commit. Sessions always close after the operation, including 
 `create_persistence()` builds a conservative PostgreSQL engine with `pool_pre_ping=True`, a
 five-connection default pool, two overflow connections, configurable pool and connection timeouts,
 and the `alignment-workbench` application name. Credentials come from the caller-supplied URL.
-The layer neither reads credentials from source nor starts an SSH tunnel.
+The layer neither reads credentials from source nor starts an SSH tunnel. `WorkbenchApplication`,
+Alembic, or the explicit database-test session establishes and owns the tunnel before constructing
+this layer.
 
 ## Read query strategy
 

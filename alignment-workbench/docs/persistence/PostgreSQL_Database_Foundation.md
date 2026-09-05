@@ -25,14 +25,15 @@ explicit migration decision.
 ## Configuration
 
 Copy `.env.example` to `.env` and set both URLs. Runtime sessions use
-`REGISTRY_ALIGN_DATABASE_URL`; Alembic prefers `REGISTRY_ALIGN_DATABASE_ADMIN_URL`. Credentials
-must not be placed in source, committed configuration, commands, or logs.
+`REGISTRY_ALIGN_DATABASE_URL`; Alembic prefers `REGISTRY_ALIGN_DATABASE_ADMIN_URL`. Both URLs name
+the local endpoint forwarded by the `registry-db` SSH alias. Credentials must not be placed in
+source, committed configuration, commands, or logs.
 
-The persistence package never opens the SSH tunnel. Start it separately:
-
-```powershell
-ssh -N registry-db
-```
+The application composition root, online Alembic environment, and explicit PostgreSQL test session
+each start and stop their own hidden OpenSSH process. The SQLAlchemy persistence package does not
+own subprocesses. Do not launch a tunnel separately; the configured local port must be free when
+one of these entry points starts. The alias, executable, and readiness timeout have optional
+`.env` overrides documented in `.env.example`.
 
 ## Migration commands
 
@@ -43,6 +44,9 @@ $env:UV_CACHE_DIR = '.uv-cache'
 uv run alembic -c .\alembic.ini current
 uv run alembic -c .\alembic.ini upgrade head
 ```
+
+Online Alembic commands own the SSH tunnel for the duration of the command. Offline SQL generation
+does not contact PostgreSQL and does not start SSH.
 
 Migration-cycle tests perform downgrade and re-upgrade only against an explicit disposable target.
 Never run `downgrade base` against the remote `registry_align` schema merely to test the cycle.

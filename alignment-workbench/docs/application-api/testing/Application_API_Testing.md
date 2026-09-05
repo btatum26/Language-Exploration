@@ -36,6 +36,10 @@ The contract tests cover:
 24. A rejected import preserves the source and removes its matching unreferenced managed copy.
 25. Clean session close is idempotent, preserves managed audio, and rejects later operations.
 26. Unsaved changes require save or explicit discard before session close.
-27. Application startup validates dependencies, sanitizes failures, and disposes resources exactly once.
+27. Application startup opens the SSH tunnel before PostgreSQL, sanitizes failures, and closes the database pool before stopping the tunnel exactly once.
 
 Implemented lower-level coverage is documented in [Data model and persistence testing](../../testing/Data_Model_and_Persistence_Testing.md).
+
+`tests/test_gui.py` separately verifies the GUI boundary with public-API/session test doubles,
+including lifecycle order, catalog rendering, annotation edit/undo/redo/save behavior, dirty-close
+confirmation, and stale background-open rejection.

@@ -43,7 +43,7 @@ TABLES = {
 
 
 @pytest.fixture(scope="module")
-def runtime_engine() -> Iterator[Engine]:
+def runtime_engine(database_tunnel: None) -> Iterator[Engine]:
     runtime_url = os.getenv("TEST_RUNTIME_DATABASE_URL")
     if not runtime_url:
         pytest.skip("TEST_RUNTIME_DATABASE_URL is required for runtime-role tests")

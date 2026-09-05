@@ -60,7 +60,7 @@ RecordingEditSession
 
 Public callers use `WorkbenchAPI` and `RecordingEditSession`. The persistence, audio-storage, and recovery implementations are injected infrastructure dependencies.
 
-`WorkbenchApplication` keeps configuration, startup, API construction, and shutdown distinct. `WorkbenchSettings.from_environment()` reads the project `.env` plus process overrides. Creating the application does no I/O; `start()` validates PostgreSQL and local roots; `shutdown()` is idempotent and disposes the owned connection pool.
+`WorkbenchApplication` keeps configuration, startup, API construction, and shutdown distinct. `WorkbenchSettings.from_environment()` reads the project `.env` plus process overrides. Creating the application does no I/O; `start()` starts and owns the SSH tunnel before validating PostgreSQL and local roots; `shutdown()` is idempotent, disposes the owned connection pool, and then stops the tunnel. A failed partial startup follows the same cleanup order.
 
 The first GUI discovery surface is also available directly on both the lifecycle owner and API facade:
 
@@ -260,6 +260,7 @@ Raw SQLAlchemy, psycopg, filesystem, decoder, and JSON parsing exceptions must n
 The API is synchronous.
 
 - GUI code runs blocking handler calls in worker threads.
+- The application process owns exactly one SSH tunnel for its started lifetime; callers do not launch one separately.
 - An edit session may be owned by one interaction thread at a time.
 - A session does not share SQLAlchemy sessions between calls.
 - In-memory annotation reads do not require database calls.

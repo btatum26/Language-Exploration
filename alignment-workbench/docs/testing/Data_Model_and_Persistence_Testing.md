@@ -11,7 +11,9 @@
 | `tests/test_domain_models.py` | Strict immutable models, deterministic JSON, geometry, snapshots, and stable create/save revision IDs |
 | `tests/test_persistence_mappers.py` | Domain-to-row values and trusted row-to-domain hydration |
 | `tests/test_application_api.py` | Public handlers, edit sessions, validation, WAV storage, durable recovery, retries, and conflicts |
-| `tests/test_application_runtime.py` | Validated settings, explicit startup, sanitized failures, and idempotent shutdown |
+| `tests/test_application_runtime.py` | Validated settings, ordered tunnel/database startup, sanitized failures, and idempotent cleanup |
+| `tests/test_ssh_tunnel.py` | OpenSSH command construction, hidden Windows startup, endpoint readiness, failure, timeout, and shutdown |
+| `tests/test_gui.py` | Qt lifecycle wiring, catalog states, session-driven annotation editing, dirty close, and stale-result protection |
 | `tests/database/test_snapshot_metadata.py` | ORM metadata, constraints, indexes, engine, and session configuration |
 | `tests/database/test_snapshot_postgresql.py` | Alembic lifecycle and PostgreSQL constraint behavior |
 | `tests/database/test_persistence_postgresql.py` | Store CRUD, bounded reads, ordered hydration, atomic creation/saves, retries, and real concurrent-save behavior |
@@ -59,7 +61,11 @@ Runtime-role tests are separate and opt in through `TEST_RUNTIME_DATABASE_URL`. 
 
 The handler, edit-session, audio-storage, and recovery contracts are covered in `tests/test_application_api.py`. The case map is in [Application API testing](../application-api/testing/Application_API_Testing.md).
 
-Producer-specific abstractions remain excluded, and GUI behavior remains future integration work. Analysis-boundary expectations are documented in [Analysis notes](../data-models/Analysis_Notes.md).
+The PySide6 reference client is covered with GUI-boundary doubles rather than SQLite. The tests
+exercise catalog presentation, session-driven annotation editing, undo/redo/save, dirty-close
+protection, lifecycle order, and stale background-result rejection. Producer-specific analysis
+abstractions remain excluded. Analysis-boundary expectations are documented in
+[Analysis notes](../data-models/Analysis_Notes.md).
 
 ## Commands
 
@@ -78,6 +84,10 @@ $env:TEST_DATABASE_SCHEMA = 'registry_align_snapshot_test'
 uv run pytest tests/database
 ```
 
+The database-test session starts one hidden SSH tunnel before migration or direct PostgreSQL access
+and stops it after the session. `TEST_DATABASE_URL` and `TEST_RUNTIME_DATABASE_URL`, when both are
+set, must name the same local tunnel endpoint. Do not start `ssh -N registry-db` separately.
+
 Runtime-role verification requires the deployed application role explicitly:
 
 ```powershell
@@ -86,3 +96,4 @@ uv run pytest tests/database/test_runtime_role_postgresql.py
 ```
 
 Never point migration-cycle or destructive persistence fixtures at a development or shared schema.
+Absence of the explicit test URLs still skips PostgreSQL integration tests without starting SSH.

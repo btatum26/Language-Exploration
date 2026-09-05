@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, make_url, pool
 
 from alembic import context
+from application.ssh_tunnel import SshTunnel, SshTunnelConfig
 from persistence.sqlalchemy import Base
 
 config = context.config
@@ -80,20 +81,34 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    database_url = _database_url()
     section = config.get_section(config.config_ini_section, {})
-    section["sqlalchemy.url"] = _database_url()
-    connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            include_schemas=True,
-            include_object=_include_object,
-            version_table=_version_table(),
-            version_table_schema="public",
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+    section["sqlalchemy.url"] = database_url
+    manage_tunnel = config.attributes.get("manage_ssh_tunnel", True)
+    tunnel = (
+        SshTunnel(SshTunnelConfig.from_mapping(database_url, os.environ)) if manage_tunnel else None
+    )
+    if tunnel is not None:
+        tunnel.start()
+    try:
+        connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
+        try:
+            with connectable.connect() as connection:
+                context.configure(
+                    connection=connection,
+                    target_metadata=target_metadata,
+                    include_schemas=True,
+                    include_object=_include_object,
+                    version_table=_version_table(),
+                    version_table_schema="public",
+                )
+                with context.begin_transaction():
+                    context.run_migrations()
+        finally:
+            connectable.dispose()
+    finally:
+        if tunnel is not None:
+            tunnel.stop()
 
 
 if context.is_offline_mode():

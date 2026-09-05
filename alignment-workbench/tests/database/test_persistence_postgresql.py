@@ -60,6 +60,7 @@ SCHEMA = os.getenv("TEST_DATABASE_SCHEMA", "registry_align_persistence_test")
 def _alembic_config() -> Config:
     config = Config(ROOT / "alembic.ini")
     config.attributes["snapshot_schema"] = SCHEMA
+    config.attributes["manage_ssh_tunnel"] = False
     return config
 
 
@@ -79,7 +80,7 @@ def _drop_disposable_version_table(test_url: str) -> None:
 
 
 @pytest.fixture(scope="module")
-def persistence_engine() -> Iterator[Engine]:
+def persistence_engine(database_tunnel: None) -> Iterator[Engine]:
     test_url = os.getenv("TEST_DATABASE_URL")
     if not test_url:
         pytest.skip("TEST_DATABASE_URL is required for persistence integration tests")

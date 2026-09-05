@@ -3,6 +3,9 @@
 .mfa/
 .uv-cache/
 .pytest_cache/
+.pytest-*/
+.test-tmp/
+.*-test-tmp/
 .ruff_cache/
 .env
 .registry-align-cache/

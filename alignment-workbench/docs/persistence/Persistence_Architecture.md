@@ -16,6 +16,7 @@ src/models.py
 
 src/application/
     runtime.py        validated settings and process lifecycle
+    ssh_tunnel.py     bounded hidden OpenSSH process and readiness checks
     workbench.py      public API composition
     cli.py            executable lifecycle/import smoke path
     handlers.py       public application handlers
@@ -27,6 +28,13 @@ src/application/
     persistence.py    framework-free store protocols
     read_models.py    frozen persistence and GUI discovery projections
     errors.py         stable application exceptions
+
+src/gui/
+    app.py            Qt and real application lifecycle wiring
+    controller.py     public API and edit-session orchestration
+    main_window.py    navigation, playback, and editing widgets
+    tasks.py          Qt worker boundary for synchronous calls
+    waveform.py       bounded PCM envelope and annotation rendering
 
 src/persistence/
     audio/resolver.py           logical URI resolution protocol
@@ -46,6 +54,7 @@ alembic/
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | Domain models | Portable structure, immutability, deterministic JSON, snapshot-local validation | SQL, transactions, external analysis |
+| `WorkbenchApplication` | SSH tunnel, configured infrastructure startup, and ordered cleanup | SQL queries or ORM rows |
 | Persistence protocols | Public storage operations and return types | SQLAlchemy implementation details |
 | `SqlAlchemyPersistence` | Session lifecycle, transactions, repositories, error translation | GUI state, audio bytes, recovery files |
 | Repositories and mappers | Bounded queries, inserts, exact hydration | Commits or public framework types |
@@ -73,9 +82,12 @@ The [database foundation](PostgreSQL_Database_Foundation.md) owns configuration,
 - Trusted reads use one centralized hydration path.
 - The application layer enforces JSON Schema policy, Nyquist and audio-frame bounds, edit commands, and recovery coordination.
 
-## Remaining integration points
+## GUI integration
 
-GUI, playback, full CLI presentation, and external analysis integrations are not implemented in this checkout. They consume the [application API](../application-api/Alignment_Workbench_Unified_Application_API.md) without writing SQL or recovery files directly. The existing executable is limited to lifecycle, discovery, and import smoke verification.
+The first-pass [desktop reference client](../gui/Reference_Client.md) consumes the application API
+without importing persistence internals. Full CLI presentation and external analysis integrations
+remain unimplemented. The non-GUI lifecycle/discovery/import smoke remains available through
+`python src/cli_main.py`.
 
 ## Exclusions
 

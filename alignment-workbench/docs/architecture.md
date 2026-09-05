@@ -1,13 +1,18 @@
 # System Architecture
 
-**Status:** Runnable lifecycle, synchronous application API, local audio storage, recovery, and persistence implemented
+**Status:** Runnable Qt client, lifecycle, synchronous application API, local audio storage, recovery, and persistence implemented
 
 ## Current system boundary
 
 ```text
-WorkbenchApplication
+PySide6 reference client
        |
        v
+WorkbenchApplication
+       | owns process lifetime
+       +---------------------> OpenSSH tunnel
+       |                             |
+       v                             |
 WorkbenchAPI and RecordingEditSession
               |
               v
@@ -18,14 +23,16 @@ PersistenceStore   AudioStorageHandler   RecoveryOutbox
        |                    |                   |
        v                    v                   v
 SqlAlchemyPersistence  Local WAV storage  Recovery files
-              |
-              v
-PostgreSQL registry_align schema
+       |                             |
+       +-----------------------------+
+                     |
+                     v
+        PostgreSQL registry_align schema
 ```
 
-`WorkbenchApplication` is the process composition root. Creating it is configuration-only. `start()` constructs the owned PostgreSQL engine/session factory, local audio storage, recovery outbox, persistence adapter, and one `WorkbenchAPI`; it then validates the database through harmless recording and library reads. `shutdown()` invalidates the exposed API, closes the persistence facade, and disposes the connection pool. Startup and shutdown are idempotent, and the application supports `with` lifecycle use.
+`WorkbenchApplication` is the process composition root. Creating it is configuration-only. `start()` starts a hidden OpenSSH process through the configured SSH alias, waits for the local endpoint named by the runtime database URL, constructs the owned PostgreSQL engine/session factory, local audio storage, recovery outbox, persistence adapter, and one `WorkbenchAPI`, then validates the database through harmless recording and library reads. `shutdown()` invalidates the exposed API, closes the persistence facade and connection pool, and finally stops the owned tunnel. Partial startup failures unwind the same resources in that order. Startup and shutdown are idempotent, and the application supports `with` lifecycle use.
 
-The current checkout contains the portable model, synchronous application API, in-memory editing session, immutable WAV storage, durable recovery outbox, synchronous PostgreSQL persistence, and a small executable smoke interface. It does not contain a Qt GUI, playback engine, or analysis runner.
+The current checkout contains the portable model, synchronous application API, in-memory editing session, immutable WAV storage, durable recovery outbox, synchronous PostgreSQL persistence, and a first-pass PySide6 desktop reference client. QtMultimedia provides simple local playback. A bounded worker prepares the waveform while the GUI renders annotations from current edit-session values. Signal-analysis execution is not implemented.
 
 `LocalAudioStorage` ingests, resolves, and verifies PCM WAV assets below one configured root. It uses `registry-audio://assets/<uuid>` as the stable logical URI.
 
@@ -37,11 +44,13 @@ The [application API](application-api/Alignment_Workbench_Unified_Application_AP
 
 - Domain models in `src/models.py` do not import persistence or framework types.
 - Public handlers, contracts, persistence protocols, read models, and errors in `src/application/` do not expose SQLAlchemy.
+- The process composition root owns SSH; the SQLAlchemy persistence package receives an already reachable database URL and never starts subprocesses.
 - SQLAlchemy rows, sessions, expressions, and PostgreSQL types remain inside `src/persistence/sqlalchemy/`.
 - Each public persistence call owns one short-lived session and transaction.
 - PostgreSQL stores metadata and immutable snapshots, not audio bytes.
 - Analysis systems produce ordinary `SignalAnnotation` values and do not write SQL directly.
 - GUI, CLI, and analysis code must depend inward through application contracts.
+- The GUI owns presentation state only; `RecordingEditSession` remains the mutable authority.
 
 ## Data and history
 
@@ -58,4 +67,5 @@ Edit-session undo history and pending recovery operations are not canonical Post
 - [PostgreSQL schema](persistence/PostgreSQL_Schema.md)
 - [SQLAlchemy persistence layer](persistence/SQLAlchemy_Persistence_Layer.md)
 - [Application API](application-api/Alignment_Workbench_Unified_Application_API.md)
+- [Desktop reference client](gui/Reference_Client.md)
 - [Current test coverage](testing/Data_Model_and_Persistence_Testing.md)

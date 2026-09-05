@@ -24,6 +24,7 @@ from application.errors import (
 )
 from application.read_models import AnnotationLibraryListItem, RecordingListItem
 from application.recovery import FileRecoveryOutbox
+from application.ssh_tunnel import SshTunnel, SshTunnelConfig
 from application.workbench import WorkbenchAPI, create_workbench
 from persistence.sqlalchemy import SqlAlchemyPersistence, create_persistence
 
@@ -37,6 +38,9 @@ class WorkbenchSettings:
     database_url: str = field(repr=False)
     audio_root: Path
     recovery_root: Path
+    ssh_alias: str = "registry-db"
+    ssh_executable: str = "ssh"
+    ssh_startup_timeout_seconds: float = 5.0
 
     def __post_init__(self) -> None:
         try:
@@ -45,6 +49,7 @@ class WorkbenchSettings:
             raise WorkbenchConfigurationError(
                 "REGISTRY_ALIGN_DATABASE_URL must be a valid PostgreSQL URL"
             ) from exc
+
         if url.drivername != "postgresql+psycopg":
             raise WorkbenchConfigurationError(
                 "REGISTRY_ALIGN_DATABASE_URL must use postgresql+psycopg"
@@ -53,8 +58,39 @@ class WorkbenchSettings:
             raise WorkbenchConfigurationError(
                 "REGISTRY_ALIGN_DATABASE_URL must name a PostgreSQL database"
             )
+
+        tunnel_config = SshTunnelConfig.from_mapping(
+            self.database_url,
+            {
+                "ALIGNMENT_WORKBENCH_SSH_ALIAS": self.ssh_alias,
+                "ALIGNMENT_WORKBENCH_SSH_EXECUTABLE": self.ssh_executable,
+                "ALIGNMENT_WORKBENCH_SSH_STARTUP_TIMEOUT_SECONDS": str(
+                    self.ssh_startup_timeout_seconds
+                ),
+            },
+        )
+        object.__setattr__(self, "ssh_alias", tunnel_config.ssh_alias)
+        object.__setattr__(self, "ssh_executable", tunnel_config.executable)
+        object.__setattr__(
+            self,
+            "ssh_startup_timeout_seconds",
+            tunnel_config.startup_timeout_seconds,
+        )
         object.__setattr__(self, "audio_root", self.audio_root.resolve())
         object.__setattr__(self, "recovery_root", self.recovery_root.resolve())
+
+    @property
+    def ssh_tunnel_config(self) -> SshTunnelConfig:
+        return SshTunnelConfig.from_mapping(
+            self.database_url,
+            {
+                "ALIGNMENT_WORKBENCH_SSH_ALIAS": self.ssh_alias,
+                "ALIGNMENT_WORKBENCH_SSH_EXECUTABLE": self.ssh_executable,
+                "ALIGNMENT_WORKBENCH_SSH_STARTUP_TIMEOUT_SECONDS": str(
+                    self.ssh_startup_timeout_seconds
+                ),
+            },
+        )
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str | None]) -> WorkbenchSettings:
@@ -69,10 +105,14 @@ class WorkbenchSettings:
         recovery_root = (
             Path(recovery_root_value) if recovery_root_value else audio_root / "recovery"
         )
+        tunnel_config = SshTunnelConfig.from_mapping(database_url, values)
         return cls(
             database_url=database_url,
             audio_root=audio_root,
             recovery_root=recovery_root,
+            ssh_alias=tunnel_config.ssh_alias,
+            ssh_executable=tunnel_config.executable,
+            ssh_startup_timeout_seconds=tunnel_config.startup_timeout_seconds,
         )
 
     @classmethod
@@ -94,6 +134,7 @@ class WorkbenchApplication:
 
     def __init__(self, settings: WorkbenchSettings) -> None:
         self._settings = settings
+        self._tunnel: SshTunnel | None = None
         self._persistence: SqlAlchemyPersistence | None = None
         self._api: WorkbenchAPI | None = None
 
@@ -114,8 +155,11 @@ class WorkbenchApplication:
     def start(self) -> WorkbenchApplication:
         if self.started:
             return self
+        tunnel: SshTunnel | None = None
         persistence: SqlAlchemyPersistence | None = None
         try:
+            tunnel = SshTunnel(self.settings.ssh_tunnel_config)
+            tunnel.start()
             persistence = create_persistence(self.settings.database_url)
             audio_storage = LocalAudioStorage(self.settings.audio_root)
             recovery_outbox = FileRecoveryOutbox(self.settings.recovery_root)
@@ -127,32 +171,46 @@ class WorkbenchApplication:
             api.list_recordings(limit=1)
             api.list_annotation_libraries()
         except DatabaseUnavailableError as exc:
-            if persistence is not None:
-                persistence.close()
+            self._close_infrastructure(persistence, tunnel)
             raise WorkbenchStartupError(
                 "could not connect to the configured PostgreSQL database"
             ) from exc
         except PersistenceError as exc:
-            if persistence is not None:
-                persistence.close()
+            self._close_infrastructure(persistence, tunnel)
             raise WorkbenchStartupError(
                 "configured PostgreSQL schema is missing or incompatible"
             ) from exc
         except WorkbenchError as exc:
-            if persistence is not None:
-                persistence.close()
+            self._close_infrastructure(persistence, tunnel)
             raise WorkbenchStartupError(str(exc)) from exc
+        except Exception:
+            self._close_infrastructure(persistence, tunnel)
+            raise
 
+        self._tunnel = tunnel
         self._persistence = persistence
         self._api = api
         return self
 
     def shutdown(self) -> None:
+        tunnel = self._tunnel
         persistence = self._persistence
         self._api = None
         self._persistence = None
-        if persistence is not None:
-            persistence.close()
+        self._tunnel = None
+        self._close_infrastructure(persistence, tunnel)
+
+    @staticmethod
+    def _close_infrastructure(
+        persistence: SqlAlchemyPersistence | None,
+        tunnel: SshTunnel | None,
+    ) -> None:
+        try:
+            if persistence is not None:
+                persistence.close()
+        finally:
+            if tunnel is not None:
+                tunnel.stop()
 
     def __enter__(self) -> WorkbenchApplication:
         return self.start()

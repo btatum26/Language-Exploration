@@ -133,7 +133,8 @@ create_engine(
 
 Provide a session-factory builder using `expire_on_commit=False`, `autoflush=False`, and ordinary transactional sessions. Do not create a global live `Session`. The engine may be shared; sessions may not be shared across threads.
 
-Do not open the SSH tunnel in the SQLAlchemy module. The URL points at the already-established tunnel.
+Do not open the SSH tunnel in the SQLAlchemy module. The application composition root establishes
+and owns the tunnel before constructing SQLAlchemy persistence.
 
 ## Tables to implement
 

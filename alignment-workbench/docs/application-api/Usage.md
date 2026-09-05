@@ -6,7 +6,7 @@
 
 ## Runnable application
 
-The process composition root loads `.env`, validates configuration, owns the PostgreSQL pool and local storage, builds one `WorkbenchAPI`, performs harmless discovery reads during startup, and disposes the pool on exit.
+The process composition root loads `.env`, validates configuration, starts and owns the SSH tunnel, owns the PostgreSQL pool and local storage, builds one `WorkbenchAPI`, performs harmless discovery reads during startup, and disposes the pool before stopping the tunnel on exit. No separately launched tunnel is required or accepted.
 
 Required configuration names are:
 
@@ -14,6 +14,7 @@ Required configuration names are:
 - `ALIGNMENT_WORKBENCH_AUDIO_ROOT`: writable directory for immutable managed WAV files.
 
 `ALIGNMENT_WORKBENCH_RECOVERY_ROOT` is optional and defaults to `<audio-root>/recovery`.
+The SSH alias defaults to `registry-db`, the executable defaults to `ssh`, and startup waits up to five seconds for the local host and port in `REGISTRY_ALIGN_DATABASE_URL`. These defaults can be overridden with `ALIGNMENT_WORKBENCH_SSH_ALIAS`, `ALIGNMENT_WORKBENCH_SSH_EXECUTABLE`, and `ALIGNMENT_WORKBENCH_SSH_STARTUP_TIMEOUT_SECONDS`.
 
 From `alignment-workbench`, launch the configured application with:
 
@@ -22,7 +23,10 @@ $env:UV_CACHE_DIR = '.uv-cache'
 uv run python src/main.py
 ```
 
-This starts the real application, validates PostgreSQL and local storage, lists recordings and annotation libraries, and shuts down. It does not mutate PostgreSQL.
+This starts the owned hidden SSH tunnel, validates PostgreSQL and local storage, and opens the
+PySide6 reference client. The configured local database port must be free before startup. Closing
+the window shuts down the database pool and terminates the tunnel. See the
+[desktop reference client](../gui/Reference_Client.md) for the exact walkthrough.
 
 ## Manual import smoke path
 
@@ -30,7 +34,7 @@ Use a short uncompressed PCM WAV file and the same configured database/audio roo
 
 ```powershell
 $env:UV_CACHE_DIR = '.uv-cache'
-uv run python src/main.py --import-audio 'C:\path\to\short.wav' --name 'Manual smoke' --language en
+uv run python src/cli_main.py --import-audio 'C:\path\to\short.wav' --name 'Manual smoke' --language en
 ```
 
 The command lists the existing catalog, copies and fingerprints the source without changing it, creates revision one, checks that discovery returns the imported recording, opens and closes it, and finally shuts down the application. Expected terminal markers are `application=started`, `import_open_close=ok`, and `application=shutdown`.

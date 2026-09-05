@@ -2,7 +2,7 @@
 
 **Status:** Implemented
 
-**Implementation:** `src/application/` provides validated runtime settings, the process lifecycle, public handlers, discovery DTOs, edit sessions, shared types, validation, local audio storage, recovery outbox, and the API composition root. `PersistenceStore` remains the injected database boundary.
+**Implementation:** `src/application/` provides validated runtime settings, the process-owned SSH tunnel, public handlers, discovery DTOs, edit sessions, shared types, validation, local audio storage, recovery outbox, and the API composition root. `PersistenceStore` remains the injected database boundary.
 
 **Scope:** Data models, data handling, recording editing, persistence coordination, local audio, and recovery
 
@@ -31,4 +31,5 @@ The documentation follows the system boundary from public application contracts 
 - [System architecture](../architecture.md)
 - [Signal annotation data model](../data-models/Language_Exploration_Signal_Annotation_Data_Model.md)
 - [Application API usage](Usage.md)
+- [Desktop reference client](../gui/Reference_Client.md)
 - [Persistence architecture](../persistence/Persistence_Architecture.md)
