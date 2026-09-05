@@ -1,5 +1,5 @@
-"""Launch Alignment Workbench from the flat, non-package uv project."""
+"""Launch the Alignment Workbench desktop client from the flat uv project."""
 
-from application.cli import main
+from gui.app import main
 
 raise SystemExit(main())
