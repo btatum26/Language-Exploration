@@ -170,6 +170,12 @@ class WorkbenchApplication:
             )
             api.list_recordings(limit=1)
             api.list_annotation_libraries()
+            try:
+                api.ensure_core_library()
+            except PersistenceError as exc:
+                raise WorkbenchStartupError(
+                    "Core library initialization failed: could not read or publish core@0.1"
+                ) from exc
         except DatabaseUnavailableError as exc:
             self._close_infrastructure(persistence, tunnel)
             raise WorkbenchStartupError(

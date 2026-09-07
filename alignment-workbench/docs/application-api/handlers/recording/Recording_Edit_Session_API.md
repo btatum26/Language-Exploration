@@ -74,6 +74,7 @@ def create_annotation(
     geometry: Geometry,
     attributes: Mapping[str, object] | None = None,
     confidence: float | None = None,
+    label: str | None = None,
     note: str | None = None,
     provenance_ref: str | None = None,
 ) -> SignalAnnotation: ...
@@ -103,7 +104,7 @@ def find_annotations(
 
 Rules:
 
-- `create_annotation` generates a new annotation UUID.
+- `create_annotation` generates a new annotation UUID. Its optional `label` is occurrence display text, independent of concept attributes and notes; replace the annotation to edit or clear it.
 - `add_annotation` preserves the supplied UUID and is suitable for imports and external analysis results.
 - `add_annotations` is atomic: either the entire batch is accepted or none of it is applied.
 - Annotation IDs must be unique within the editable snapshot.

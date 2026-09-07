@@ -13,15 +13,17 @@ from application import (
     WorkbenchStartupError,
 )
 from application.read_models import AnnotationLibraryListItem, RecordingCatalogRecord
+from tests.test_application_api import MemoryPersistenceStore
 
 
-class LifecyclePersistence:
+class LifecyclePersistence(MemoryPersistenceStore):
     def __init__(
         self,
         events: list[str] | None = None,
         *,
         fail_startup: bool = False,
     ) -> None:
+        super().__init__()
         self.events = events if events is not None else []
         self.fail_startup = fail_startup
         self.close_calls = 0

@@ -10,7 +10,7 @@ This directory describes the implemented domain, application, and persistence bo
 | PostgreSQL schema and runtime-role policy | Implemented | [Persistence architecture](persistence/Persistence_Architecture.md) |
 | Synchronous SQLAlchemy persistence | Implemented | [SQLAlchemy persistence layer](persistence/SQLAlchemy_Persistence_Layer.md) |
 | Workbench handlers and recording edit session | Implemented | [Application API](application-api/Alignment_Workbench_Unified_Application_API.md) |
-| Audio ingestion, resolution, and verification | Implemented for WAV | [Audio storage port](application-api/ports/Audio_Storage_Handler_API.md) |
+| Audio ingestion, resolution, and verification | Implemented for WAV and MP3 | [Audio storage port](application-api/ports/Audio_Storage_Handler_API.md) |
 | Recovery outbox and retry handlers | Implemented | [Recovery handler](application-api/handlers/recovery/Recovery_Handler_API.md) |
 | Desktop GUI, playback, and waveform | First-pass reference client implemented | [Desktop reference client](gui/Reference_Client.md) |
 | Signal-analysis execution | Not implemented | [Analysis notes](data-models/Analysis_Notes.md) |

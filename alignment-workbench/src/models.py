@@ -274,6 +274,7 @@ class SignalAnnotation(DomainModel):
     geometry: Geometry
     attributes: dict[str, Any] = Field(default_factory=dict)
     confidence: float | None = Field(default=None, ge=0, le=1)
+    label: str | None = None
     note: str | None = None
     provenance_ref: str | None = None
 

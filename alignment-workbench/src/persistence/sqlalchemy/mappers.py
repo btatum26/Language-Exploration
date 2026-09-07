@@ -235,6 +235,7 @@ def annotation_from_rows(
         ),
         attributes=annotation.attributes,
         confidence=annotation.confidence,
+        label=annotation.label,
         note=annotation.note,
         provenance_ref=annotation.provenance_ref,
     )
@@ -298,6 +299,7 @@ def annotation_row_values(
         "polygon_vertices": geometry.polygon_vertices,
         "attributes": attributes,
         "confidence": annotation.confidence,
+        "label": annotation.label,
         "note": annotation.note,
         "provenance_ref": annotation.provenance_ref,
     }

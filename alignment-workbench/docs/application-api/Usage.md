@@ -6,12 +6,12 @@
 
 ## Runnable application
 
-The process composition root loads `.env`, validates configuration, starts and owns the SSH tunnel, owns the PostgreSQL pool and local storage, builds one `WorkbenchAPI`, performs harmless discovery reads during startup, and disposes the pool before stopping the tunnel on exit. No separately launched tunnel is required or accepted.
+The process composition root loads `.env`, validates configuration, starts and owns the SSH tunnel, owns the PostgreSQL pool and local storage, builds one `WorkbenchAPI`, checks storage/schema availability and initializes the exact core library during startup, and disposes the pool before stopping the tunnel on exit. No separately launched tunnel is required or accepted.
 
 Required configuration names are:
 
 - `REGISTRY_ALIGN_DATABASE_URL`: `postgresql+psycopg` URL for the runtime role. Store the credential in `.env`; startup errors never print it.
-- `ALIGNMENT_WORKBENCH_AUDIO_ROOT`: writable directory for immutable managed WAV files.
+- `ALIGNMENT_WORKBENCH_AUDIO_ROOT`: writable directory for immutable managed WAV and MP3 files.
 
 `ALIGNMENT_WORKBENCH_RECOVERY_ROOT` is optional and defaults to `<audio-root>/recovery`.
 The SSH alias defaults to `registry-db`, the executable defaults to `ssh`, and startup waits up to five seconds for the local host and port in `REGISTRY_ALIGN_DATABASE_URL`. These defaults can be overridden with `ALIGNMENT_WORKBENCH_SSH_ALIAS`, `ALIGNMENT_WORKBENCH_SSH_EXECUTABLE`, and `ALIGNMENT_WORKBENCH_SSH_STARTUP_TIMEOUT_SECONDS`.
@@ -30,14 +30,40 @@ the window shuts down the database pool and terminates the tunnel. See the
 
 ## Manual import smoke path
 
-Use a short uncompressed PCM WAV file and the same configured database/audio root:
+Use a short uncompressed PCM WAV or MP3 file and the same configured database/audio root:
 
 ```powershell
 $env:UV_CACHE_DIR = '.uv-cache'
-uv run python src/cli_main.py --import-audio 'C:\path\to\short.wav' --name 'Manual smoke' --language en
+uv run python src/cli_main.py --import-audio 'C:\path\to\short.mp3' --name 'Manual smoke' --language en
 ```
 
 The command lists the existing catalog, copies and fingerprints the source without changing it, creates revision one, checks that discovery returns the imported recording, opens and closes it, and finally shuts down the application. Expected terminal markers are `application=started`, `import_open_close=ok`, and `application=shutdown`.
+
+## Exact core publication
+
+`workbench.ensure_core_library()` returns the persisted `LibraryVersion` for `core@0.1`.
+`WorkbenchApplication.start()` invokes it after availability checks, before initial GUI discovery.
+For directly composed APIs, call it explicitly when initialization is wanted. It uses normal
+`LibraryHandler` operations and the canonical content hash, reuses existing matching content,
+recovers a missing publication, and verifies concurrent winners. Conflicting immutable content
+fails clearly; it never substitutes `latest`, renames publications, or runs migrations.
+Identical content under another version label also fails clearly because storage enforces one
+content hash per library.
+
+New GUI imports put this exact manifest entry in the initial creation command:
+
+```python
+from models import PinnedLibraryVersion
+
+core = workbench.ensure_core_library()
+core_pin = PinnedLibraryVersion(namespace="core", version="0.1", content_sha256=core.content_sha256)
+# Pass libraries=(core_pin,) to CreateRecordingCommand.
+```
+
+For an existing recording, explicitly call `session.pin_library_version(core)` and save normally.
+Opening never adds a pin implicitly. `ConceptRef("core@0.1:test")` accepts a `TimeIntervalGeometry`
+and requires no attributes. Initialization and persistence operations are synchronous application
+calls; a GUI must use its worker boundary for them.
 
 ## Editing and saving
 
@@ -50,11 +76,7 @@ workbench = create_workbench(
 
 session = workbench.recordings.open(recording_id)
 
-concept = next(
-    entry
-    for entry in session.list_available_concepts()
-    if entry.entry_key == "vowel-a"
-)
+concept = next(entry for entry in session.list_available_concepts() if entry.entry_key == "vowel-a")
 
 annotation = session.create_annotation(
     concept_ref=ConceptRef("italian@1.0:vowel-a"),

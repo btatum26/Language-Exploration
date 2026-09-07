@@ -207,7 +207,7 @@ def test_migration_catalog_shape(database_engine: Engine) -> None:
     with database_engine.connect() as connection:
         assert (
             connection.scalar(text(f"SELECT version_num FROM public.{version_table}"))
-            == "20260830_0002_storage_uri"
+            == "20260906_0003_annotation_label"
         )
 
 

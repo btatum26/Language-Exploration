@@ -10,7 +10,7 @@
 | --- | --- |
 | `tests/test_domain_models.py` | Strict immutable models, deterministic JSON, geometry, snapshots, and stable create/save revision IDs |
 | `tests/test_persistence_mappers.py` | Domain-to-row values and trusted row-to-domain hydration |
-| `tests/test_application_api.py` | Public handlers, edit sessions, validation, WAV storage, durable recovery, retries, and conflicts |
+| `tests/test_application_api.py` | Public handlers, edit sessions, validation, WAV/MP3 storage, durable recovery, retries, and conflicts |
 | `tests/test_application_runtime.py` | Validated settings, ordered tunnel/database startup, sanitized failures, and idempotent cleanup |
 | `tests/test_ssh_tunnel.py` | OpenSSH command construction, hidden Windows startup, endpoint readiness, failure, timeout, and shutdown |
 | `tests/test_gui.py` | Qt lifecycle wiring, catalog states, session-driven annotation editing, dirty close, and stale-result protection |

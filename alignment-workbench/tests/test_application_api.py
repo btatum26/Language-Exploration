@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import math
 import wave
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+import soundfile as sf
 
 import application.validation as validation_module
 from application import (
@@ -372,6 +374,20 @@ def write_wav(path: Path, *, sample_rate_hz: int = 8_000, frame_count: int = 800
         output.setsampwidth(2)
         output.setframerate(sample_rate_hz)
         output.writeframes(b"\x00\x00" * frame_count)
+
+
+def write_mp3(path: Path, *, sample_rate_hz: int = 8_000, frame_count: int = 800) -> None:
+    samples = [
+        0.25 * math.sin(2 * math.pi * 440 * index / sample_rate_hz)
+        for index in range(frame_count)
+    ]
+    sf.write(
+        path,
+        samples,
+        sample_rate_hz,
+        format="MP3",
+        subtype="MPEG_LAYER_III",
+    )
 
 
 def publish_test_library(api: object) -> tuple[LibraryVersion, PinnedLibraryVersion]:
@@ -777,6 +793,33 @@ def test_local_audio_storage_verifies_integrity_and_rejects_unsupported_files(
     unsupported.write_bytes(b"not audio")
     with pytest.raises(UnsupportedAudioError):
         storage.ingest(unsupported, asset_id=uuid4())
+
+
+def test_public_import_and_open_support_mp3(
+    application_system: tuple[object, MemoryPersistenceStore, Path, Path],
+) -> None:
+    api, _store, wav_source, _recovery_root = application_system
+    source = wav_source.with_suffix(".mp3")
+    write_mp3(source)
+
+    session = create_recording(api, source, name="MP3 recording")
+    recording_id = session.recording_id  # type: ignore[attr-defined]
+    asset = session.audio.asset  # type: ignore[attr-defined]
+    stored_path = session.audio.local_path  # type: ignore[attr-defined]
+
+    assert asset.original_extension == ".mp3"
+    assert asset.media_type == "audio/mpeg"
+    assert asset.codec == "mp3"
+    assert asset.sample_rate_hz == 8_000
+    assert asset.frame_count > 0
+    assert asset.channels == 1
+    assert stored_path.suffix == ".mp3"
+    assert stored_path.read_bytes() == source.read_bytes()
+    session.close()  # type: ignore[attr-defined]
+
+    reopened = api.open_recording(recording_id)  # type: ignore[attr-defined]
+    assert reopened.audio.local_path == stored_path
+    reopened.close()
 
 
 def test_recovery_outbox_quarantines_malformed_envelopes(tmp_path: Path) -> None:

@@ -271,6 +271,7 @@ class RecordingEditSession:
         geometry: Geometry,
         attributes: Mapping[str, object] | None = None,
         confidence: float | None = None,
+        label: str | None = None,
         note: str | None = None,
         provenance_ref: str | None = None,
     ) -> SignalAnnotation:
@@ -281,6 +282,7 @@ class RecordingEditSession:
             geometry=geometry,
             attributes=dict(attributes or {}),
             confidence=confidence,
+            label=label,
             note=note,
             provenance_ref=provenance_ref,
         )

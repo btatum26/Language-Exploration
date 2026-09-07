@@ -440,5 +440,6 @@ class AnnotationRow(Base):
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     confidence: Mapped[float | None] = mapped_column(Float)
+    label: Mapped[str | None] = mapped_column(Text)
     note: Mapped[str | None] = mapped_column(Text)
     provenance_ref: Mapped[str | None] = mapped_column(Text)

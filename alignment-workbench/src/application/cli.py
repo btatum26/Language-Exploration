@@ -15,7 +15,7 @@ from application.runtime import WorkbenchApplication, WorkbenchSettings
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Launch and validate Alignment Workbench")
-    parser.add_argument("--import-audio", type=Path, help="optional PCM WAV file to import")
+    parser.add_argument("--import-audio", type=Path, help="optional WAV or MP3 file to import")
     parser.add_argument("--name", help="display name for an imported recording")
     parser.add_argument("--language", default="und", help="language tag for an import")
     parser.add_argument("--limit", type=int, default=100, help="maximum recordings to list")

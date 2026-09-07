@@ -6,7 +6,7 @@
 
 ## Authority
 
-The [baseline migration](../../alembic/versions/20260830_0001_snapshot_foundation.py) and [storage URI migration](../../alembic/versions/20260830_0002_storage_uri_nonempty.py) are the executable schema definition. The [SQLAlchemy rows](../../src/persistence/sqlalchemy/rows.py) mirror that schema. This document explains the shape; it is not an alternate DDL source.
+The [baseline migration](../../alembic/versions/20260830_0001_snapshot_foundation.py) , [storage URI migration](../../alembic/versions/20260830_0002_storage_uri_nonempty.py) and [annotation label migration](../../alembic/versions/20260906_0003_annotation_label.py) are the executable schema definition. The [SQLAlchemy rows](../../src/persistence/sqlalchemy/rows.py) mirror that schema. This document explains the shape; it is not an alternate DDL source.
 
 ## Tables
 
@@ -65,7 +65,10 @@ Each `annotations` row stores one occurrence in one complete revision:
 - geometry discriminator and scalar bounds;
 - polygon vertices when the geometry is a polygon;
 - JSON-object attributes;
-- optional confidence, note, and provenance reference.
+- optional label (`TEXT NULL`), confidence, note, and provenance reference.
+
+The label names this annotation occurrence. It is stored directly on each revision annotation
+row, not in concept attributes. Existing rows retain a null label after upgrading.
 
 Composite foreign keys require the library version to be pinned by the same recording revision and the entry to belong to that version. Geometry checks enforce the required/null column shape, time and frequency ordering, finite frequency bounds, polygon-array shape, and confidence from zero through one.
 

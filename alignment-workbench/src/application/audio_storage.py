@@ -1,4 +1,4 @@
-"""Immutable local WAV storage behind the application audio port."""
+"""Immutable local WAV and MP3 storage behind the application audio port."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlsplit
 from uuid import UUID
+
+import soundfile as sf  # type: ignore[import-untyped]
 
 from application.contracts import AudioVerificationResult, ResolvedAudio
 from application.errors import (
@@ -24,15 +26,26 @@ _URI_SCHEME = "registry-audio"
 _URI_AUTHORITY = "assets"
 
 
-class _WavMetadata(NamedTuple):
+class _AudioMetadata(NamedTuple):
     codec: str
     sample_rate_hz: int
     frame_count: int
     channels: int
 
 
+class _AudioFormat(NamedTuple):
+    media_type: str
+    extension: str
+
+
+_AUDIO_FORMATS = {
+    ".wav": _AudioFormat(media_type="audio/wav", extension=".wav"),
+    ".mp3": _AudioFormat(media_type="audio/mpeg", extension=".mp3"),
+}
+
+
 class LocalAudioStorage:
-    """Store immutable WAV files below one configured root."""
+    """Store immutable PCM WAV and MP3 files below one configured root."""
 
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
@@ -55,8 +68,13 @@ class LocalAudioStorage:
             raise AudioUnavailableError(f"audio source {source_path} is unavailable") from exc
         if not source.is_file():
             raise AudioUnavailableError(f"audio source {source} is not a regular file")
-        if source.suffix.lower() != ".wav":
-            raise UnsupportedAudioError("local audio storage currently accepts WAV files only")
+        suffix = source.suffix.lower()
+        try:
+            audio_format = _AUDIO_FORMATS[suffix]
+        except KeyError as exc:
+            raise UnsupportedAudioError(
+                "local audio storage accepts uncompressed PCM WAV and MP3 files"
+            ) from exc
 
         temporary_path: Path | None = None
         digest = hashlib.sha256()
@@ -74,8 +92,8 @@ class LocalAudioStorage:
                 destination.flush()
                 os.fsync(destination.fileno())
 
-            metadata = self._read_wav_metadata(temporary_path)
-            final_path = self._assets_root / f"{asset_id}.wav"
+            metadata = self._read_metadata(temporary_path, suffix)
+            final_path = self._assets_root / f"{asset_id}{audio_format.extension}"
             self._publish(temporary_path, final_path, digest.hexdigest())
             temporary_path = None
         except (AudioIntegrityError, UnsupportedAudioError):
@@ -94,8 +112,8 @@ class LocalAudioStorage:
             sha256=digest.hexdigest(),
             storage_uri=f"{_URI_SCHEME}://{_URI_AUTHORITY}/{asset_id}",
             logical_path=source.name,
-            media_type="audio/wav",
-            original_extension=".wav",
+            media_type=audio_format.media_type,
+            original_extension=audio_format.extension,
             codec=metadata.codec,
             sample_rate_hz=metadata.sample_rate_hz,
             frame_count=metadata.frame_count,
@@ -186,12 +204,20 @@ class LocalAudioStorage:
         if uri_asset_id != audio_asset.id:
             raise AudioIntegrityError("audio storage URI does not match the audio asset ID")
         extension = (audio_asset.original_extension or ".wav").lower()
-        if extension != ".wav":
-            raise UnsupportedAudioError("local audio storage currently resolves WAV files only")
+        if extension not in _AUDIO_FORMATS:
+            raise UnsupportedAudioError(
+                "local audio storage resolves uncompressed PCM WAV and MP3 files"
+            )
         return self._assets_root / f"{audio_asset.id}{extension}"
 
+    @classmethod
+    def _read_metadata(cls, path: Path, extension: str) -> _AudioMetadata:
+        if extension == ".wav":
+            return cls._read_wav_metadata(path)
+        return cls._read_mp3_metadata(path)
+
     @staticmethod
-    def _read_wav_metadata(path: Path) -> _WavMetadata:
+    def _read_wav_metadata(path: Path) -> _AudioMetadata:
         try:
             with wave.open(str(path), "rb") as source:
                 if source.getcomptype() != "NONE":
@@ -209,7 +235,7 @@ class LocalAudioStorage:
                     raise UnsupportedAudioError(
                         f"unsupported PCM sample width: {sample_width} bytes"
                     ) from exc
-                return _WavMetadata(
+                return _AudioMetadata(
                     codec=codec,
                     sample_rate_hz=source.getframerate(),
                     frame_count=source.getnframes(),
@@ -217,6 +243,23 @@ class LocalAudioStorage:
                 )
         except (EOFError, wave.Error) as exc:
             raise UnsupportedAudioError("audio source is not a readable WAV file") from exc
+
+    @staticmethod
+    def _read_mp3_metadata(path: Path) -> _AudioMetadata:
+        try:
+            metadata = sf.info(path)
+        except (OSError, RuntimeError) as exc:
+            raise UnsupportedAudioError("audio source is not a readable MP3 file") from exc
+        if metadata.format != "MP3" or metadata.subtype != "MPEG_LAYER_III":
+            raise UnsupportedAudioError("audio source does not contain MPEG Layer III audio")
+        if metadata.samplerate <= 0 or metadata.frames <= 0 or metadata.channels <= 0:
+            raise UnsupportedAudioError("MP3 audio metadata must describe a nonempty signal")
+        return _AudioMetadata(
+            codec="mp3",
+            sample_rate_hz=int(metadata.samplerate),
+            frame_count=int(metadata.frames),
+            channels=int(metadata.channels),
+        )
 
     def _publish(self, temporary_path: Path, final_path: Path, expected_sha256: str) -> None:
         try:

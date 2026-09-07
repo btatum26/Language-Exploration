@@ -95,6 +95,7 @@ A `SignalAnnotation` is one painted occurrence over the audio. It has:
 - Geometry
 - Instance attributes
 - Optional confidence
+- Optional occurrence label for display
 - Optional note
 - Optional opaque provenance reference
 
@@ -163,7 +164,12 @@ JSON Schema policy belong to the proposed application layer.
 
 The core model allows exact geometric duplicates, partial overlap, full containment, cross-category overlap, competing annotations, and unannotated gaps. Optional library rules may be stricter, but they do not become universal database constraints.
 
-## Attributes, confidence, provenance, and notes
+## Label, attributes, confidence, provenance, and notes
+
+`SignalAnnotation.label` is optional free text naming this occurrence. It is independent of the
+concept reference, library-defined attributes, and note. Labels belong to revision snapshots and
+follow the normal edit/save history. Existing JSON without `label` loads with `label=None`; the
+GUI displays **Unlabeled** when the label is absent or blank.
 
 `attributes` is JSON containing occurrence-specific values such as word text, a producer phone label, pitch summaries, breath direction, detector measurements, or optional display parameters. It must validate against the referenced library entry's JSON Schema.
 

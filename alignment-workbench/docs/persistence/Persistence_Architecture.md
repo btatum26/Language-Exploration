@@ -23,7 +23,7 @@ src/application/
     edit_session.py   in-memory recording editing
     contracts.py      commands, results, and infrastructure ports
     validation.py     concepts, JSON Schema, geometry, and hashes
-    audio_storage.py  immutable local WAV storage
+    audio_storage.py  immutable local WAV and MP3 storage
     recovery.py       durable filesystem recovery outbox
     persistence.py    framework-free store protocols
     read_models.py    frozen persistence and GUI discovery projections
@@ -34,7 +34,7 @@ src/gui/
     controller.py     public API and edit-session orchestration
     main_window.py    navigation, playback, and editing widgets
     tasks.py          Qt worker boundary for synchronous calls
-    waveform.py       bounded PCM envelope and annotation rendering
+    waveform.py       bounded decoded-audio envelope and annotation rendering
 
 src/persistence/
     audio/resolver.py           logical URI resolution protocol
@@ -59,7 +59,7 @@ alembic/
 | `SqlAlchemyPersistence` | Session lifecycle, transactions, repositories, error translation | GUI state, audio bytes, recovery files |
 | Repositories and mappers | Bounded queries, inserts, exact hydration | Commits or public framework types |
 | PostgreSQL | Referential integrity, uniqueness, basic shape checks, linear history | JSON Schema evaluation, audio files |
-| Audio storage | Immutable PCM WAV ingestion, logical URI resolution, and verification | Playback or in-place mutation |
+| Audio storage | Immutable PCM WAV and MP3 ingestion, logical URI resolution, and verification | Playback or in-place mutation |
 | Recovery outbox | Durable pending operations, conflicts, retry records, and archival | Canonical revision history |
 
 ## Data placement

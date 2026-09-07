@@ -36,6 +36,7 @@
     {
       "id": "ed8e49d4-fab7-43df-a856-62b9d1bb27a5",
       "concept_ref": "le.prosody@1.0.0:pitch-fall",
+      "label": "Falling pitch",
       "geometry": {
         "type": "time_interval",
         "start_sample": 42100,

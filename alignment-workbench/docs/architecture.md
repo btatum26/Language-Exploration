@@ -22,7 +22,7 @@ Application commands, results, validation, and handlers
 PersistenceStore   AudioStorageHandler   RecoveryOutbox
        |                    |                   |
        v                    v                   v
-SqlAlchemyPersistence  Local WAV storage  Recovery files
+SqlAlchemyPersistence  Local audio storage  Recovery files
        |                             |
        +-----------------------------+
                      |
@@ -32,9 +32,9 @@ SqlAlchemyPersistence  Local WAV storage  Recovery files
 
 `WorkbenchApplication` is the process composition root. Creating it is configuration-only. `start()` starts a hidden OpenSSH process through the configured SSH alias, waits for the local endpoint named by the runtime database URL, constructs the owned PostgreSQL engine/session factory, local audio storage, recovery outbox, persistence adapter, and one `WorkbenchAPI`, then validates the database through harmless recording and library reads. `shutdown()` invalidates the exposed API, closes the persistence facade and connection pool, and finally stops the owned tunnel. Partial startup failures unwind the same resources in that order. Startup and shutdown are idempotent, and the application supports `with` lifecycle use.
 
-The current checkout contains the portable model, synchronous application API, in-memory editing session, immutable WAV storage, durable recovery outbox, synchronous PostgreSQL persistence, and a first-pass PySide6 desktop reference client. QtMultimedia provides simple local playback. A bounded worker prepares the waveform while the GUI renders annotations from current edit-session values. Signal-analysis execution is not implemented.
+The current checkout contains the portable model, synchronous application API, in-memory editing session, immutable WAV and MP3 storage, durable recovery outbox, synchronous PostgreSQL persistence, and a first-pass PySide6 desktop reference client. QtMultimedia provides simple local playback. A bounded worker prepares the waveform while the GUI renders annotations from current edit-session values. Signal-analysis execution is not implemented.
 
-`LocalAudioStorage` ingests, resolves, and verifies PCM WAV assets below one configured root. It uses `registry-audio://assets/<uuid>` as the stable logical URI.
+`LocalAudioStorage` ingests, resolves, and verifies uncompressed PCM WAV and MP3 assets below one configured root. It preserves the source bytes and uses `registry-audio://assets/<uuid>` as the stable logical URI.
 
 ## Application boundary
 

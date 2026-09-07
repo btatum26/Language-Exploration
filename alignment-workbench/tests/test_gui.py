@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import wave
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
@@ -8,7 +9,8 @@ from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
 import pytest
-from PySide6 import QtWidgets
+import soundfile as sf
+from PySide6 import QtCore, QtWidgets
 
 from application import (
     AnnotationLibraryListItem,
@@ -22,6 +24,7 @@ from application import (
 from gui.app import run_started_gui
 from gui.controller import WorkbenchController
 from gui.main_window import MainWindow
+from gui.waveform import load_waveform_envelope
 from models import (
     AnnotatedRecordingSnapshot,
     AudioAsset,
@@ -187,6 +190,7 @@ class FakeSession:
         geometry: Geometry,
         attributes: Mapping[str, object] | None = None,
         confidence: float | None = None,
+        label: str | None = None,
         note: str | None = None,
         provenance_ref: str | None = None,
     ) -> SignalAnnotation:
@@ -196,6 +200,7 @@ class FakeSession:
             geometry=geometry,
             attributes=dict(attributes or {}),
             confidence=confidence,
+            label=label,
             note=note,
             provenance_ref=provenance_ref,
         )
@@ -297,6 +302,9 @@ class FakeAPI:
         self.sessions = sessions
         self.open_calls: list[UUID] = []
         self.import_commands: list[CreateRecordingCommand] = []
+
+    def ensure_core_library(self) -> LibraryVersion:
+        return self.libraries.version
 
     def list_recordings(
         self,
@@ -413,6 +421,9 @@ def test_main_window_walks_annotation_edit_undo_redo_and_save(
     assert window.concept_combo.count() == 1
     assert session.dirty
 
+    qtbot.waitUntil(lambda: window.waveform._envelope is not None)
+    window.waveform.selection = (100, 250)
+    window._selection_changed((100, 250))
     window.start_sample.setValue(100)
     window.end_sample.setValue(250)
     window.note_edit.setText("initial")
@@ -434,6 +445,7 @@ def test_main_window_walks_annotation_edit_undo_redo_and_save(
     assert session.annotations[0].geometry.end_sample == 300
 
     window.save_message_edit.setText("GUI save")
+    QtCore.QTimer.singleShot(0, window.save_dialog.accept)
     window.save_action.trigger()
     assert not session.dirty
     assert "r2" in window.revision_value.text()
@@ -580,6 +592,31 @@ def test_lifecycle_starts_before_window_and_always_shuts_down(qapp: Any) -> None
         "window-shutdown",
         "application-shutdown",
     ]
+
+
+def test_mp3_waveform_is_decoded_to_a_bounded_envelope(tmp_path: Path) -> None:
+    path = tmp_path / "tone.mp3"
+    sample_rate_hz = 8_000
+    frame_count = 800
+    samples = [
+        0.25 * math.sin(2 * math.pi * 440 * index / sample_rate_hz) for index in range(frame_count)
+    ]
+    sf.write(
+        path,
+        samples,
+        sample_rate_hz,
+        format="MP3",
+        subtype="MPEG_LAYER_III",
+    )
+
+    envelope = load_waveform_envelope(path, point_count=64)
+
+    assert envelope.sample_rate_hz == sample_rate_hz
+    assert envelope.frame_count > 0
+    assert len(envelope.minimum) == 64
+    assert len(envelope.maximum) == 64
+    assert min(envelope.minimum) < 0
+    assert max(envelope.maximum) > 0
 
 
 def _write_wav(path: Path) -> None:

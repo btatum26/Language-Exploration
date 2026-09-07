@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Protocol, TypeVar
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
 from PySide6 import QtCore
 
 from application import (
@@ -30,11 +31,11 @@ from models import (
     Library,
     LibraryEntry,
     LibraryVersion,
+    PinnedLibraryVersion,
     PointGeometry,
     SignalAnnotation,
     TimeFrequencyBoxGeometry,
     TimeFrequencyPolygonGeometry,
-    TimeFrequencyVertex,
     TimeIntervalGeometry,
 )
 
@@ -92,6 +93,7 @@ class EditableRecording(Protocol):
         geometry: Geometry,
         attributes: Mapping[str, object] | None = None,
         confidence: float | None = None,
+        label: str | None = None,
         note: str | None = None,
         provenance_ref: str | None = None,
     ) -> SignalAnnotation: ...
@@ -124,6 +126,8 @@ class LibraryClient(Protocol):
 class ApplicationClient(Protocol):
     @property
     def libraries(self) -> LibraryClient: ...
+
+    def ensure_core_library(self) -> LibraryVersion: ...
 
     def list_recordings(
         self,
@@ -171,6 +175,7 @@ class WorkbenchController(QtCore.QObject):
     libraries_loading = QtCore.Signal()
     libraries_changed = QtCore.Signal(object)
     libraries_failed = QtCore.Signal(str)
+    annotation_created = QtCore.Signal(object)
     session_changed = QtCore.Signal(object)
     busy_changed = QtCore.Signal(bool)
     error = QtCore.Signal(str)
@@ -291,12 +296,20 @@ class WorkbenchController(QtCore.QObject):
         generation = self._next_generation()
 
         def operation() -> _ImportedRecording:
+            core = self._api.ensure_core_library()
             session = self._api.import_recording(
                 CreateRecordingCommand(
                     recording_id=uuid4(),
                     source_audio_path=source,
                     name=name,
                     language=language,
+                    libraries=(
+                        PinnedLibraryVersion(
+                            namespace="core",
+                            version="0.1",
+                            content_sha256=core.content_sha256,
+                        ),
+                    ),
                 )
             )
             try:
@@ -344,6 +357,8 @@ class WorkbenchController(QtCore.QObject):
         return True
 
     def pin_latest_library(self, item: AnnotationLibraryListItem) -> None:
+        if self.busy:
+            return
         session = self._session
         version_id = item.latest_version_id
         if session is None:
@@ -357,7 +372,7 @@ class WorkbenchController(QtCore.QObject):
         def success(version: LibraryVersion) -> None:
             if generation != self._generation or self._session is not session:
                 return
-            if not self._mutate(lambda: session.pin_library_version(version)):
+            if not self._mutate(lambda: session.pin_library_version(version), internal=True):
                 return
             namespaces = dict(self._namespaces_by_version_id)
             namespaces[version.id] = item.namespace
@@ -371,6 +386,55 @@ class WorkbenchController(QtCore.QObject):
             lambda exc: self.error.emit(f"Could not load library: {_error_message(exc)}"),
         )
 
+    @property
+    def core_is_pinned(self) -> bool:
+        return bool(
+            self._session
+            and any(
+                self._namespaces_by_version_id.get(v.id) == "core" and v.version_label == "0.1"
+                for v in self._session.pinned_libraries
+            )
+        )
+
+    def use_core_library(self) -> None:
+        session = self._require_session()
+        if session is None or self.busy or self.core_is_pinned:
+            return
+        generation = self._generation
+
+        def success(version: LibraryVersion) -> None:
+            if generation != self._generation or self._session is not session:
+                return
+            namespaces = dict(self._namespaces_by_version_id)
+            namespaces[version.id] = "core"
+            self._namespaces_by_version_id = MappingProxyType(namespaces)
+            self._mutate(lambda: session.pin_library_version(version), internal=True)
+
+        self._run(
+            self._api.ensure_core_library,
+            success,
+            lambda exc: self.error.emit(f"Could not use core library: {_error_message(exc)}"),
+        )
+
+    def move_boundary(self, annotation_id: UUID, start: int, end: int) -> None:
+        session = self._require_session()
+        if session is None or self.busy:
+            return
+
+        def operation() -> None:
+            current = session.get_annotation(annotation_id)
+            if not isinstance(current.geometry, TimeIntervalGeometry):
+                raise ValueError("Boundary dragging supports time intervals only")
+            replacement = current.model_copy(
+                update={
+                    "geometry": TimeIntervalGeometry(start_sample=start, end_sample=end),
+                }
+            )
+            session.replace_annotation(annotation_id, replacement)
+
+        if not self._mutate(operation):
+            self.session_changed.emit(session)
+
     def create_annotation(
         self,
         *,
@@ -381,6 +445,7 @@ class WorkbenchController(QtCore.QObject):
         min_frequency_hz: float,
         max_frequency_hz: float,
         note: str | None,
+        label: str | None = None,
     ) -> None:
         session = self._require_session()
         if session is None:
@@ -394,11 +459,13 @@ class WorkbenchController(QtCore.QObject):
                 min_frequency_hz=min_frequency_hz,
                 max_frequency_hz=max_frequency_hz,
             )
-            session.create_annotation(
+            annotation = session.create_annotation(
                 concept_ref=concept_ref,
                 geometry=geometry,
+                label=label,
                 note=note,
             )
+            self.annotation_created.emit(annotation.id)
 
         self._mutate(operation)
 
@@ -412,6 +479,7 @@ class WorkbenchController(QtCore.QObject):
         min_frequency_hz: float,
         max_frequency_hz: float,
         note: str | None,
+        label: str | None = None,
     ) -> None:
         session = self._require_session()
         if session is None:
@@ -419,6 +487,8 @@ class WorkbenchController(QtCore.QObject):
 
         def operation() -> None:
             current = session.get_annotation(annotation_id)
+            if isinstance(current.geometry, TimeFrequencyPolygonGeometry):
+                raise ValueError("Polygon editing is not supported; the annotation is preserved")
             geometry = _replacement_geometry(
                 current,
                 start_sample=start_sample,
@@ -432,6 +502,7 @@ class WorkbenchController(QtCore.QObject):
                 geometry=geometry,
                 attributes=dict(current.attributes),
                 confidence=current.confidence,
+                label=label,
                 note=note,
                 provenance_ref=current.provenance_ref,
             )
@@ -456,7 +527,7 @@ class WorkbenchController(QtCore.QObject):
 
     def save(self, *, author: str | None = None, message: str | None = None) -> None:
         session = self._require_session()
-        if session is None:
+        if session is None or self.busy:
             return
         generation = self._generation
 
@@ -525,7 +596,10 @@ class WorkbenchController(QtCore.QObject):
             self.error.emit("No recording is open")
         return self._session
 
-    def _mutate(self, operation: Callable[[], object]) -> bool:
+    def _mutate(self, operation: Callable[[], object], *, internal: bool = False) -> bool:
+        if self.busy and not internal:
+            self.error.emit("Wait for the current operation to finish before editing")
+            return False
         session = self._session
         if session is None:
             self.error.emit("No recording is open")
@@ -536,6 +610,7 @@ class WorkbenchController(QtCore.QObject):
             self.error.emit(_error_message(exc))
             return False
         self.session_changed.emit(session)
+        self.notice.emit("Recording updated")
         return True
 
     def _run(
@@ -591,19 +666,6 @@ def _new_geometry(
             min_frequency_hz=min_frequency_hz,
             max_frequency_hz=max_frequency_hz,
         )
-    if geometry_type == "time_frequency_polygon":
-        return TimeFrequencyPolygonGeometry(
-            start_sample=start_sample,
-            end_sample=end_sample,
-            min_frequency_hz=min_frequency_hz,
-            max_frequency_hz=max_frequency_hz,
-            vertices=(
-                TimeFrequencyVertex(sample=start_sample, frequency_hz=min_frequency_hz),
-                TimeFrequencyVertex(sample=end_sample, frequency_hz=min_frequency_hz),
-                TimeFrequencyVertex(sample=end_sample, frequency_hz=max_frequency_hz),
-                TimeFrequencyVertex(sample=start_sample, frequency_hz=max_frequency_hz),
-            ),
-        )
     raise ValueError(f"unsupported geometry type {geometry_type}")
 
 
@@ -627,16 +689,12 @@ def _replacement_geometry(
             min_frequency_hz=min_frequency_hz,
             max_frequency_hz=max_frequency_hz,
         )
-    return TimeFrequencyPolygonGeometry(
-        start_sample=start_sample,
-        end_sample=end_sample,
-        min_frequency_hz=min_frequency_hz,
-        max_frequency_hz=max_frequency_hz,
-        vertices=geometry.vertices,
-    )
+    raise ValueError("Polygon editing is not supported")
 
 
 def _error_message(exc: BaseException) -> str:
+    if isinstance(exc, ValidationError):
+        return "; ".join(error["msg"] for error in exc.errors(include_url=False)[:3])
     if isinstance(exc, (WorkbenchError, ValueError)):
         return str(exc)
     return "Unexpected application failure"

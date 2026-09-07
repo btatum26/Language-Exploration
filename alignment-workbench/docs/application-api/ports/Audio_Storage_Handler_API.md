@@ -1,6 +1,6 @@
 # Internal AudioStorageHandler port
 
-**Status:** Implemented for uncompressed PCM WAV files
+**Status:** Implemented for uncompressed PCM WAV and MP3 files
 
 [Application API overview](../Alignment_Workbench_Unified_Application_API.md)
 
@@ -45,7 +45,7 @@ Resolution:
 
 Full hashing belongs to ingestion, recording open, explicit `verify`, or maintenance audits.
 
-`LocalAudioStorage` is the concrete implementation. The current decoder boundary accepts uncompressed PCM WAV input and reports `UnsupportedAudioError` for other formats or compressed WAV data.
+`LocalAudioStorage` is the concrete implementation. The decoder boundary accepts uncompressed PCM WAV and MPEG Layer III input and reports `UnsupportedAudioError` for other formats, compressed WAV data, or unreadable audio. Ingestion preserves the original bytes; MP3 metadata and waveform decoding use SoundFile's bundled libsndfile runtime.
 Both resolution and verification reject logical URIs or filesystem links that escape the configured storage root.
 
 `discard` is limited to compensating a failed import. It is idempotent for a missing target and refuses to remove a path outside the root or bytes whose hash no longer matches the staged asset. Ordinary edit-session close and application shutdown never call it.
