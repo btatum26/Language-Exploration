@@ -87,6 +87,15 @@ still supports **Pin latest** as a separate explicit action.
 
 ## Navigation and layout
 
+- **Audio view** above the plot switches between **Waveform** (default) and **Spectrogram**.
+  Both retain the same viewport, selection, annotations and playback position. Click, drag,
+  zoom and pan work in either view. The choice affects only the display, not saved revisions.
+  Spectrogram frequency runs from 0 Hz at the bottom to half the sample rate at the top;
+  brighter colors show stronger energy on a fixed -90 to 0 dB amplitude scale.
+  WAV and MP3 previews load on a worker after navigation settles and are reused when toggling
+  back at the same viewport. Analysis uses 25 ms Hann windows (capped at 4,096 samples),
+  averages channel powers, and samples at most 1,200 time columns. Long overviews use spaced
+  windows and can miss brief events; zoom in for finer time detail. Stale results are discarded.
 - Click the waveform to move the playhead and seek playback. A drag selects an interval and
   does not repeatedly seek. A seek requested while media loads is applied when it becomes seekable.
 - Use the mouse wheel or **Zoom + / Zoom -** for horizontal zoom. Wheel zoom anchors at the cursor.
@@ -108,7 +117,7 @@ Geometry type and concept are locked while editing an existing annotation. Creat
 annotation for a different type. Polygon creation and editing are not offered; existing polygons
 can be inspected and are preserved by saves. Time intervals support boundary dragging; existing
 points and time-frequency boxes support the available numeric controls. Attribute authoring,
-polygon vertices, full library authoring, spectrograms, split/merge and automatic analysis remain
+polygon vertices, full library authoring, split/merge and automatic analysis remain
 outside this pass. The sample spinboxes currently cover up to 2,147,483,647 samples.
 
 ## Playback and shutdown

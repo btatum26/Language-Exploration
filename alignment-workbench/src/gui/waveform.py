@@ -10,6 +10,7 @@ from uuid import UUID
 import soundfile as sf  # type: ignore[import-untyped]
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from gui.spectrogram import SpectrogramPreview
 from models import SignalAnnotation
 
 
@@ -186,6 +187,9 @@ class WaveformView(QtWidgets.QWidget):
         )
         self._envelope: WaveformEnvelope | None = None
         self._detail: WaveformEnvelope | None = None
+        self.spectrogram: SpectrogramPreview | None = None
+        self.show_spectrogram = False
+        self._spectrogram_message = "Preparing spectrogram..."
         self._annotations: tuple[SignalAnnotation, ...] = ()
         self._frame_count = 1
         self._sample_rate_hz = 1
@@ -216,6 +220,8 @@ class WaveformView(QtWidgets.QWidget):
     def clear(self) -> None:
         self.cancel_gesture()
         self._envelope = self._detail = None
+        self.spectrogram = None
+        self._spectrogram_message = "Preparing spectrogram..."
         self._annotations = ()
         self._selected_annotation_id = None
         self._playhead_seconds = 0.0
@@ -236,6 +242,24 @@ class WaveformView(QtWidgets.QWidget):
 
     def set_detail(self, envelope: WaveformEnvelope) -> None:
         self._detail = envelope
+        self.update()
+
+    def set_spectrogram_mode(self, enabled: bool) -> None:
+        self.cancel_gesture()
+        self.show_spectrogram = enabled
+        self.update()
+
+    @property
+    def audio_ready(self) -> bool:
+        return self._envelope is not None
+
+    def set_spectrogram(self, preview: SpectrogramPreview) -> None:
+        self.spectrogram = preview
+        self._spectrogram_message = ""
+        self.update()
+
+    def set_spectrogram_message(self, message: str) -> None:
+        self._spectrogram_message = message
         self.update()
 
     def set_annotations(
@@ -326,7 +350,10 @@ class WaveformView(QtWidgets.QWidget):
                     annotation_label(annotation),
                 )
         wave_bounds = bounds.adjusted(0, 44, 0, 0)
-        self._paint_waveform(painter, wave_bounds)
+        if self.show_spectrogram and self._envelope is not None:
+            self._paint_spectrogram(painter, wave_bounds)
+        else:
+            self._paint_waveform(painter, wave_bounds)
         if self.selection:
             left, right = (self.sample_to_x(v) for v in self.selection)
             painter.fillRect(
@@ -347,6 +374,31 @@ class WaveformView(QtWidgets.QWidget):
                 QtCore.Qt.AlignmentFlag.AlignCenter,
                 f"{sample / self._sample_rate_hz:.3f}s",
             )
+
+    def _paint_spectrogram(self, painter: QtGui.QPainter, bounds: QtCore.QRectF) -> None:
+        preview = self.spectrogram
+        if preview is not None:
+            left = self.sample_to_x(preview.start_sample)
+            right = self.sample_to_x(preview.end_sample)
+            painter.save()
+            painter.setClipRect(bounds)
+            painter.drawImage(
+                QtCore.QRectF(left, bounds.top(), right - left, bounds.height()), preview.image
+            )
+            painter.restore()
+            for fraction in (0.0, 0.5, 1.0):
+                y = bounds.top() + (bounds.height() - 18) * fraction
+                label = QtCore.QRectF(bounds.left() + 3, y, 85, 18)
+                painter.fillRect(label, QtGui.QColor(15, 15, 25, 200))
+                painter.setPen(QtGui.QColor("#ffffff"))
+                painter.drawText(
+                    label,
+                    QtCore.Qt.AlignmentFlag.AlignCenter,
+                    f"{preview.maximum_frequency_hz * (1 - fraction):g} Hz",
+                )
+        if self._spectrogram_message:
+            painter.setPen(QtGui.QColor("#ffffff"))
+            painter.drawText(bounds, QtCore.Qt.AlignmentFlag.AlignCenter, self._spectrogram_message)
 
     def _paint_waveform(self, painter: QtGui.QPainter, bounds: QtCore.QRectF) -> None:
         envelope = self._envelope

@@ -15,6 +15,7 @@ from gui.controller import (
     EditableRecording,
     WorkbenchController,
 )
+from gui.spectrogram import SpectrogramPreview, load_spectrogram
 from gui.tasks import TaskRunner, TaskSubmitter
 from gui.waveform import (
     WaveformEnvelope,
@@ -47,10 +48,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._waveform_recording_id: UUID | None = None
         self._shutdown = False
         self._detail_pending = False
+        self._spectrogram_pending = False
         self._detail_timer = QtCore.QTimer(self)
         self._detail_timer.setSingleShot(True)
         self._detail_timer.setInterval(120)
         self._detail_timer.timeout.connect(self._load_detail)
+        self._detail_timer.timeout.connect(self._load_spectrogram)
         self._library_status = "loading"
         self._playback_failure = ""
         self._pending_seek: int | None = None
@@ -207,6 +210,15 @@ class MainWindow(QtWidgets.QMainWindow):
         transport.addWidget(self.stop_button)
         transport.addWidget(self.playback_time)
         transport.addStretch(1)
+        transport.addWidget(QtWidgets.QLabel("Audio view:", panel))
+        self.audio_view_toggle = QtWidgets.QComboBox(panel)
+        self.audio_view_toggle.setObjectName("audio_view_toggle")
+        self.audio_view_toggle.setAccessibleName("Audio view")
+        self.audio_view_toggle.addItems(["Waveform", "Spectrogram"])
+        self.audio_view_toggle.setToolTip(
+            "Switch audio display; brighter colors show stronger energy."
+        )
+        transport.addWidget(self.audio_view_toggle)
         layout.addLayout(transport)
         layout.addWidget(self.playback_status)
 
@@ -224,7 +236,9 @@ class MainWindow(QtWidgets.QMainWindow):
             button.clicked.connect(callback)
             navigation.addWidget(button)
         layout.addLayout(navigation)
-        self.selection_readout = QtWidgets.QLabel("Drag across the waveform to select an interval.")
+        self.selection_readout = QtWidgets.QLabel(
+            "Drag across the audio view to select an interval."
+        )
         self.selection_readout.setWordWrap(True)
         layout.addWidget(self.selection_readout)
         self.workspace_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical, panel)
@@ -408,6 +422,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.waveform.seek_requested.connect(self._seek_sample)
         self.waveform.boundary_committed.connect(self.controller.move_boundary)
         self.waveform.viewport_changed.connect(lambda *_: self._detail_timer.start())
+        self.audio_view_toggle.currentIndexChanged.connect(self._audio_view_changed)
         self.controller.annotation_created.connect(self._annotation_created)
         self.concept_combo.currentIndexChanged.connect(self._concept_changed)
         self.geometry_combo.currentIndexChanged.connect(self._geometry_changed)
@@ -732,7 +747,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.editor_mode.setText(
             "Edit selected: geometry is locked. Use New annotation for a different type."
             if has_selection
-            else "New annotation: select an interval on the waveform first."
+            else "New annotation: select an interval on the audio view first."
         )
         if has_selection and not supported:
             self.editor_mode.setText(
@@ -876,7 +891,7 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.Slot()
     def _create_annotation(self) -> None:
         if self.waveform.selection is None:
-            self._show_error("Select an interval on the waveform before creating an annotation")
+            self._show_error("Select an interval on the audio view before creating an annotation")
             return
         choice = self._current_concept_choice()
         geometry_type = self.geometry_combo.currentData()
@@ -1062,7 +1077,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.start_sample.setValue(start)
             self.end_sample.setValue(end)
         else:
-            self.selection_readout.setText("Drag across the waveform to select an interval.")
+            self.selection_readout.setText("Drag across the audio view to select an interval.")
         self._update_actions()
 
     def _boundary_readout_changed(self) -> None:
@@ -1076,7 +1091,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _load_detail(self) -> None:
         session = self.controller.session
-        if self._shutdown or session is None or self._detail_pending:
+        if (
+            self._shutdown
+            or session is None
+            or self._detail_pending
+            or self.waveform.show_spectrogram
+        ):
             return
         viewport = self.waveform.viewport
         generation = self._waveform_generation
@@ -1107,6 +1127,56 @@ class MainWindow(QtWidgets.QMainWindow):
         self._waveform_runner.submit(
             lambda: load_waveform_detail(path, *viewport), success, failure
         )
+
+    def _audio_view_changed(self, index: int) -> None:
+        self.waveform.set_spectrogram_mode(index == 1)
+        self._detail_timer.start()
+
+    def _load_spectrogram(self) -> None:
+        session = self.controller.session
+        if (
+            self._shutdown
+            or session is None
+            or self._spectrogram_pending
+            or not self.waveform.show_spectrogram
+            or not self.waveform.audio_ready
+        ):
+            return
+        viewport = self.waveform.viewport
+        preview = self.waveform.spectrogram
+        if preview is not None and (preview.start_sample, preview.end_sample) == viewport:
+            self.waveform.set_spectrogram_message("")
+            return
+        generation = self._waveform_generation
+        path = session.audio.local_path
+        self._spectrogram_pending = True
+        self.waveform.set_spectrogram_message("Preparing spectrogram...")
+
+        def current() -> bool:
+            return (
+                not self._shutdown
+                and generation == self._waveform_generation
+                and viewport == self.waveform.viewport
+            )
+
+        def finished() -> None:
+            self._spectrogram_pending = False
+            if not self._shutdown and not current():
+                self._detail_timer.start()
+
+        def success(result: SpectrogramPreview) -> None:
+            if current():
+                self.waveform.set_spectrogram(result)
+            finished()
+
+        def failure(_exc: BaseException) -> None:
+            if current():
+                self.waveform.set_spectrogram_message(
+                    "Spectrogram unavailable. Switch views or zoom to retry."
+                )
+            finished()
+
+        self._waveform_runner.submit(lambda: load_spectrogram(path, *viewport), success, failure)
 
     def _seek_sample(self, sample: int) -> None:
         session = self.controller.session
