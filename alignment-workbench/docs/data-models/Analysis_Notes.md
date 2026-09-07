@@ -19,7 +19,7 @@ A producer may:
 - Reuse an existing compatible entry.
 - Add an entry by publishing a new project-library version.
 - Publish a producer-specific library version.
-- Use a core unclassified entry when an event is not yet understood.
+- Use `core@0.1:unknown` for an examined interval whose content cannot be identified.
 
 The domain and persistence layers validate concept pointers but do not decide which concept a producer should choose. Producers construct domain objects and will call the application layer; they do not write SQL directly.
 
@@ -75,7 +75,7 @@ Breath and silence detectors publish interval annotations. They do not fill ever
 
 ## Human painting
 
-A user selects a library entry, paints compatible geometry, adjusts attributes, and saves a new full recording revision. Unknown observations use core unclassified entries rather than forcing a premature classification.
+A user selects a library entry, paints compatible geometry, adjusts attributes, and saves a new full recording revision. Examined but unidentified intervals can use `core@0.1:unknown`; blank space remains unannotated.
 
 ## Legacy-model migration notes
 

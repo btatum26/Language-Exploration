@@ -70,7 +70,7 @@ def exercise_first_use(qtbot, api, tmp_path, monkeypatch, *, size=(1024, 768), s
     assert not session.dirty
     assert session.pinned_libraries == (core,)
     assert window.controller.core_is_pinned
-    assert str(window.controller.available_concepts[0].reference) == "core@0.1:test"
+    assert str(window.controller.available_concepts[0].reference) == "core@0.1:silence"
     assert "core@0.1" in window.concept_combo.currentText()
     assert window.geometry_combo.currentData() == "time_interval"
     assert not window.minimum_frequency.isVisible()

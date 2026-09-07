@@ -126,21 +126,17 @@ Each recording revision also pins a manifest of every library version used in it
 The snapshot rejects duplicate pinned `namespace@version` pairs and annotations whose concept
 namespace and version are absent from that manifest.
 
-## Unclassified entries
+## Bundled core concepts
 
-A future core library should include at least:
-
-```text
-unclassified-point-event
-unclassified-interval-event
-unclassified-time-frequency-event
-```
-
-These entries preserve unusual evidence without prematurely forcing it into IPA or another established category.
+The shipped `core@0.1` contains exactly `silence`, `unknown`, `word`, `syllable`, `noise`,
+`breath`, and `marker`. Examined but unidentified intervals use `unknown`; unannotated space
+has no assigned concept. No generic phoneme or unclassified geometry entries are bundled.
+See [Bundled libraries](../application-api/Bundled_Libraries.md) for the phonetics/prosody
+starter inventory and declarative file format.
 
 ## Attribute validation
 
-An entry's `attribute_schema` defines valid occurrence-specific attributes. The database stores attributes as JSONB. JSON Schema evaluation against the exact pinned entry belongs to the proposed application layer.
+An entry's `attribute_schema` defines valid occurrence-specific attributes. The database stores attributes as JSONB. JSON Schema evaluation against the exact pinned entry belongs to the application layer.
 
 Optional validation hints may describe minimum duration, ranges, producer conventions, or visual grouping. Library-specific rules must not silently create a universal linguistic hierarchy.
 
@@ -162,7 +158,7 @@ Old recording revisions always resolve their entries using the versions they ori
 
 The foundation does not decide:
 
-- Exact contents of IPA, breath, spectral-event, or prosody libraries
+- Full IPA coverage, diacritic composition, and spectral-event libraries
 - Automatic equivalence among entries from different producers
 - Reusable word lexicons
 - Ontology inference

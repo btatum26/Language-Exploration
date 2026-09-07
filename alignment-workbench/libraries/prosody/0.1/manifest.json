@@ -1,0 +1,6 @@
+{
+  "namespace": "prosody",
+  "name": "Prosody",
+  "version": "0.1",
+  "purpose": "Independent qualitative pitch contours; intervals may overlap words, syllables, and sounds."
+}

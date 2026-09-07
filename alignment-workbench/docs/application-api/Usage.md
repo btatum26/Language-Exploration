@@ -6,7 +6,7 @@
 
 ## Runnable application
 
-The process composition root loads `.env`, validates configuration, starts and owns the SSH tunnel, owns the PostgreSQL pool and local storage, builds one `WorkbenchAPI`, checks storage/schema availability and initializes the exact core library during startup, and disposes the pool before stopping the tunnel on exit. No separately launched tunnel is required or accepted.
+The process composition root loads `.env`, validates configuration, starts and owns the SSH tunnel, owns the PostgreSQL pool and local storage, builds one `WorkbenchAPI`, checks storage/schema availability and initializes the three bundled libraries during startup, and disposes the pool before stopping the tunnel on exit. No separately launched tunnel is required or accepted.
 
 Required configuration names are:
 
@@ -39,10 +39,15 @@ uv run python src/cli_main.py --import-audio 'C:\path\to\short.mp3' --name 'Manu
 
 The command lists the existing catalog, copies and fingerprints the source without changing it, creates revision one, checks that discovery returns the imported recording, opens and closes it, and finally shuts down the application. Expected terminal markers are `application=started`, `import_open_close=ok`, and `application=shutdown`.
 
+## Bundled publications
+
+See [Bundled libraries](Bundled_Libraries.md) for the core, phonetics, and prosody inventories,
+file format, GUI steps, and fresh-database transition from the old test-only placeholder.
+
 ## Exact core publication
 
 `workbench.ensure_core_library()` returns the persisted `LibraryVersion` for `core@0.1`.
-`WorkbenchApplication.start()` invokes it after availability checks, before initial GUI discovery.
+`WorkbenchApplication.start()` invokes `ensure_bundled_libraries()` after availability checks, before initial GUI discovery.
 For directly composed APIs, call it explicitly when initialization is wanted. It uses normal
 `LibraryHandler` operations and the canonical content hash, reuses existing matching content,
 recovers a missing publication, and verifies concurrent winners. Conflicting immutable content
@@ -61,7 +66,7 @@ core_pin = PinnedLibraryVersion(namespace="core", version="0.1", content_sha256=
 ```
 
 For an existing recording, explicitly call `session.pin_library_version(core)` and save normally.
-Opening never adds a pin implicitly. `ConceptRef("core@0.1:test")` accepts a `TimeIntervalGeometry`
+Opening never adds a pin implicitly. `ConceptRef("core@0.1:silence")` accepts a `TimeIntervalGeometry`
 and requires no attributes. Initialization and persistence operations are synchronous application
 calls; a GUI must use its worker boundary for them.
 

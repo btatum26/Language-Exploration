@@ -1,0 +1,901 @@
+[
+  {
+    "entry_key": "a",
+    "display_name": "Open front unrounded vowel",
+    "description": "Open front unrounded vowel.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "a",
+      "category": "vowel",
+      "features": {
+        "height": "open",
+        "backness": "front",
+        "rounding": "unrounded"
+      },
+      "aliases": [
+        "a",
+        "a",
+        "open front unrounded vowel"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "e",
+    "display_name": "Close-mid front unrounded vowel",
+    "description": "Close-mid front unrounded vowel.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "e",
+      "category": "vowel",
+      "features": {
+        "height": "close-mid",
+        "backness": "front",
+        "rounding": "unrounded"
+      },
+      "aliases": [
+        "e",
+        "e",
+        "close-mid front unrounded vowel"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "epsilon",
+    "display_name": "Open-mid front unrounded vowel",
+    "description": "Open-mid front unrounded vowel.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "ɛ",
+      "category": "vowel",
+      "features": {
+        "height": "open-mid",
+        "backness": "front",
+        "rounding": "unrounded"
+      },
+      "aliases": [
+        "epsilon",
+        "ɛ",
+        "open-mid front unrounded vowel"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "i",
+    "display_name": "Close front unrounded vowel",
+    "description": "Close front unrounded vowel.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "i",
+      "category": "vowel",
+      "features": {
+        "height": "close",
+        "backness": "front",
+        "rounding": "unrounded"
+      },
+      "aliases": [
+        "i",
+        "i",
+        "close front unrounded vowel"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "o",
+    "display_name": "Close-mid back rounded vowel",
+    "description": "Close-mid back rounded vowel.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "o",
+      "category": "vowel",
+      "features": {
+        "height": "close-mid",
+        "backness": "back",
+        "rounding": "rounded"
+      },
+      "aliases": [
+        "o",
+        "o",
+        "close-mid back rounded vowel"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "open-o",
+    "display_name": "Open-mid back rounded vowel",
+    "description": "Open-mid back rounded vowel.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "ɔ",
+      "category": "vowel",
+      "features": {
+        "height": "open-mid",
+        "backness": "back",
+        "rounding": "rounded"
+      },
+      "aliases": [
+        "open-o",
+        "ɔ",
+        "open-mid back rounded vowel"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "u",
+    "display_name": "Close back rounded vowel",
+    "description": "Close back rounded vowel.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "u",
+      "category": "vowel",
+      "features": {
+        "height": "close",
+        "backness": "back",
+        "rounding": "rounded"
+      },
+      "aliases": [
+        "u",
+        "u",
+        "close back rounded vowel"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "p",
+    "display_name": "Voiceless bilabial plosive",
+    "description": "Voiceless bilabial plosive.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "p",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiceless",
+        "place": "bilabial",
+        "manner": "plosive"
+      },
+      "aliases": [
+        "p",
+        "p",
+        "voiceless bilabial plosive"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "b",
+    "display_name": "Voiced bilabial plosive",
+    "description": "Voiced bilabial plosive.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "b",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "bilabial",
+        "manner": "plosive"
+      },
+      "aliases": [
+        "b",
+        "b",
+        "voiced bilabial plosive"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "t",
+    "display_name": "Voiceless alveolar plosive",
+    "description": "Voiceless alveolar plosive.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "t",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiceless",
+        "place": "alveolar",
+        "manner": "plosive"
+      },
+      "aliases": [
+        "t",
+        "t",
+        "voiceless alveolar plosive"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "d",
+    "display_name": "Voiced alveolar plosive",
+    "description": "Voiced alveolar plosive.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "d",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "alveolar",
+        "manner": "plosive"
+      },
+      "aliases": [
+        "d",
+        "d",
+        "voiced alveolar plosive"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "k",
+    "display_name": "Voiceless velar plosive",
+    "description": "Voiceless velar plosive.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "k",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiceless",
+        "place": "velar",
+        "manner": "plosive"
+      },
+      "aliases": [
+        "k",
+        "k",
+        "voiceless velar plosive"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "g",
+    "display_name": "Voiced velar plosive",
+    "description": "Voiced velar plosive.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "ɡ",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "velar",
+        "manner": "plosive"
+      },
+      "aliases": [
+        "g",
+        "ɡ",
+        "voiced velar plosive"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "f",
+    "display_name": "Voiceless labiodental fricative",
+    "description": "Voiceless labiodental fricative.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "f",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiceless",
+        "place": "labiodental",
+        "manner": "fricative"
+      },
+      "aliases": [
+        "f",
+        "f",
+        "voiceless labiodental fricative"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "v",
+    "display_name": "Voiced labiodental fricative",
+    "description": "Voiced labiodental fricative.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "v",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "labiodental",
+        "manner": "fricative"
+      },
+      "aliases": [
+        "v",
+        "v",
+        "voiced labiodental fricative"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "s",
+    "display_name": "Voiceless alveolar fricative",
+    "description": "Voiceless alveolar fricative.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "s",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiceless",
+        "place": "alveolar",
+        "manner": "fricative"
+      },
+      "aliases": [
+        "s",
+        "s",
+        "voiceless alveolar fricative"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "z",
+    "display_name": "Voiced alveolar fricative",
+    "description": "Voiced alveolar fricative.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "z",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "alveolar",
+        "manner": "fricative"
+      },
+      "aliases": [
+        "z",
+        "z",
+        "voiced alveolar fricative"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "esh",
+    "display_name": "Voiceless postalveolar fricative",
+    "description": "Voiceless postalveolar fricative.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "ʃ",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiceless",
+        "place": "postalveolar",
+        "manner": "fricative"
+      },
+      "aliases": [
+        "esh",
+        "ʃ",
+        "voiceless postalveolar fricative"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "ezh",
+    "display_name": "Voiced postalveolar fricative",
+    "description": "Voiced postalveolar fricative.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "ʒ",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "postalveolar",
+        "manner": "fricative"
+      },
+      "aliases": [
+        "ezh",
+        "ʒ",
+        "voiced postalveolar fricative"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "m",
+    "display_name": "Voiced bilabial nasal",
+    "description": "Voiced bilabial nasal.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "m",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "bilabial",
+        "manner": "nasal"
+      },
+      "aliases": [
+        "m",
+        "m",
+        "voiced bilabial nasal"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "n",
+    "display_name": "Voiced alveolar nasal",
+    "description": "Voiced alveolar nasal.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "n",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "alveolar",
+        "manner": "nasal"
+      },
+      "aliases": [
+        "n",
+        "n",
+        "voiced alveolar nasal"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "palatal-n",
+    "display_name": "Voiced palatal nasal",
+    "description": "Voiced palatal nasal.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "ɲ",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "palatal",
+        "manner": "nasal"
+      },
+      "aliases": [
+        "palatal-n",
+        "ɲ",
+        "voiced palatal nasal"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "eng",
+    "display_name": "Voiced velar nasal",
+    "description": "Voiced velar nasal.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "ŋ",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "velar",
+        "manner": "nasal"
+      },
+      "aliases": [
+        "eng",
+        "ŋ",
+        "voiced velar nasal"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "l",
+    "display_name": "Voiced alveolar lateral approximant",
+    "description": "Voiced alveolar lateral approximant.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "l",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "alveolar",
+        "manner": "lateral approximant"
+      },
+      "aliases": [
+        "l",
+        "l",
+        "voiced alveolar lateral approximant"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "palatal-l",
+    "display_name": "Voiced palatal lateral approximant",
+    "description": "Voiced palatal lateral approximant.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "ʎ",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "palatal",
+        "manner": "lateral approximant"
+      },
+      "aliases": [
+        "palatal-l",
+        "ʎ",
+        "voiced palatal lateral approximant"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "r",
+    "display_name": "Voiced alveolar trill",
+    "description": "Voiced alveolar trill.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "r",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "alveolar",
+        "manner": "trill"
+      },
+      "aliases": [
+        "r",
+        "r",
+        "voiced alveolar trill"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "tap",
+    "display_name": "Voiced alveolar tap or flap",
+    "description": "Voiced alveolar tap or flap.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "ɾ",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "alveolar",
+        "manner": "tap or flap"
+      },
+      "aliases": [
+        "tap",
+        "ɾ",
+        "voiced alveolar tap or flap"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "j",
+    "display_name": "Voiced palatal approximant",
+    "description": "Voiced palatal approximant.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "j",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "palatal",
+        "manner": "approximant"
+      },
+      "aliases": [
+        "j",
+        "j",
+        "voiced palatal approximant"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  },
+  {
+    "entry_key": "w",
+    "display_name": "Voiced labial-velar approximant",
+    "description": "Voiced labial-velar approximant.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {
+      "prefer_ipa_symbol": true
+    },
+    "metadata": {
+      "ipa_symbol": "w",
+      "category": "consonant",
+      "features": {
+        "voicing": "voiced",
+        "place": "labial-velar",
+        "manner": "approximant"
+      },
+      "aliases": [
+        "w",
+        "w",
+        "voiced labial-velar approximant"
+      ],
+      "source": "https://www.internationalphoneticassociation.org/IPAcharts/common_files/pdfs/pdfs_IPA_charts_archive/IPA_unitipa_2020.pdf"
+    }
+  }
+]

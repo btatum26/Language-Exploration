@@ -1,0 +1,107 @@
+[
+  {
+    "entry_key": "silence",
+    "display_name": "Silence",
+    "description": "An explicitly identified silent interval. Unannotated space has no assigned annotation and is not implicitly silence.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {},
+    "metadata": {}
+  },
+  {
+    "entry_key": "unknown",
+    "display_name": "Unknown",
+    "description": "An examined interval whose content cannot be identified. Unexamined space remains unannotated.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {},
+    "metadata": {}
+  },
+  {
+    "entry_key": "word",
+    "display_name": "Word",
+    "description": "An independently annotated word interval. Use the occurrence label for word text; no parent or segmentation is required.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {},
+    "metadata": {}
+  },
+  {
+    "entry_key": "syllable",
+    "display_name": "Syllable",
+    "description": "An independently annotated syllable interval. Use the occurrence label for syllable text; no containment is required.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {},
+    "metadata": {}
+  },
+  {
+    "entry_key": "noise",
+    "display_name": "Noise",
+    "description": "An explicitly identified non-speech noise interval.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {},
+    "metadata": {}
+  },
+  {
+    "entry_key": "breath",
+    "display_name": "Breath",
+    "description": "An audible breathing interval.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {},
+    "metadata": {}
+  },
+  {
+    "entry_key": "marker",
+    "display_name": "Marker",
+    "description": "A named point in the recording. Use the occurrence label for its name and note for free-form notes.",
+    "allowed_geometry_types": [
+      "point"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {},
+    "metadata": {}
+  }
+]

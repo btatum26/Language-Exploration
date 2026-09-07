@@ -308,6 +308,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.editor_form = form = QtWidgets.QFormLayout()
         form.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.WrapLongRows)
         form.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.concept_search = QtWidgets.QLineEdit(group)
+        self.concept_search.setPlaceholderText("Search name, IPA symbol, or alias")
+        self.category_filter = QtWidgets.QComboBox(group)
+        self.category_filter.addItem("All categories", "")
         self.concept_combo = QtWidgets.QComboBox(group)
         self.concept_combo.setObjectName("concept_combo")
         self.concept_combo.setSizeAdjustPolicy(
@@ -329,6 +333,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.boundary_readout = QtWidgets.QLabel(group)
         self.boundary_readout.setWordWrap(True)
         form.addRow("Label (optional)", self.label_edit)
+        form.addRow("Search", self.concept_search)
+        form.addRow("Category", self.category_filter)
         form.addRow("Concept", self.concept_combo)
         form.addRow("Geometry", self.geometry_combo)
         form.addRow("Start sample", self.start_sample)
@@ -424,6 +430,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.waveform.viewport_changed.connect(lambda *_: self._detail_timer.start())
         self.audio_view_toggle.currentIndexChanged.connect(self._audio_view_changed)
         self.controller.annotation_created.connect(self._annotation_created)
+        self.concept_search.textChanged.connect(self._refresh_concepts)
+        self.category_filter.currentIndexChanged.connect(self._refresh_concepts)
         self.concept_combo.currentIndexChanged.connect(self._concept_changed)
         self.geometry_combo.currentIndexChanged.connect(self._geometry_changed)
         self.create_annotation_button.clicked.connect(self._create_annotation)
@@ -513,6 +521,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._selected_annotation_id = None
             with QtCore.QSignalBlocker(self.annotation_table):
                 self.annotation_table.clearSelection()
+        self.waveform.definitions = {
+            c.reference: c.entry for c in self.controller.available_concepts
+        }
         self._refresh_workspace(session)
         if self._waveform_recording_id != session.recording_id:
             self._prepare_waveform(session)
@@ -574,7 +585,32 @@ class MainWindow(QtWidgets.QMainWindow):
         previous = self._current_concept_reference()
         self.concept_combo.blockSignals(True)
         self.concept_combo.clear()
-        for choice in self.controller.available_concepts:
+        choices = self.controller.available_concepts
+        category = self.category_filter.currentData()
+        with QtCore.QSignalBlocker(self.category_filter):
+            self.category_filter.clear()
+            self.category_filter.addItem("All categories", "")
+            descriptors = {}
+            for choice in choices:
+                key = choice.entry.metadata.get("category")
+                descriptor = choice.entry.metadata.get("category_descriptor", {})
+                if isinstance(key, str):
+                    name = descriptor.get("name", key) if isinstance(descriptor, dict) else key
+                    descriptors[key] = name if isinstance(name, str) else key
+            for key, name in sorted(descriptors.items()):
+                self.category_filter.addItem(name, key)
+            self.category_filter.setCurrentIndex(max(0, self.category_filter.findData(category)))
+        category = self.category_filter.currentData()
+        query = self.concept_search.text().strip().casefold()
+        for choice in choices:
+            if self._selected_annotation_id is None:
+                if category and choice.entry.metadata.get("category") != category:
+                    continue
+                searchable = (
+                    choice.display_text + " " + str(choice.entry.metadata.get("aliases", ""))
+                )
+                if query and query not in searchable.casefold():
+                    continue
             self.concept_combo.addItem(choice.display_text, choice)
             if previous is not None and choice.reference == previous:
                 self.concept_combo.setCurrentIndex(self.concept_combo.count() - 1)
@@ -597,7 +633,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 else f"{geometry.end_sample / session.audio.asset.sample_rate_hz:.4f}",
                 annotation.note or "",
                 str(annotation.id),
-                annotation_label(annotation),
+                annotation_label(annotation, self.waveform.definitions),
             )
             for column, value in enumerate(values):
                 cell = QtWidgets.QTableWidgetItem(value)
@@ -716,6 +752,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.waveform.set_editable(editable)
         self.new_annotation_button.setEnabled(editable)
         self.concept_combo.setEnabled(editable and not has_selection)
+        self.concept_search.setEnabled(editable and not has_selection)
+        self.category_filter.setEnabled(editable and not has_selection)
         self.geometry_combo.setEnabled(editable and not has_selection)
         self.geometry_combo.setToolTip(
             "Geometry is locked when editing. Create a new annotation for a different type."
@@ -741,7 +779,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.update_annotation_button.setVisible(has_selection)
         self.delete_annotation_button.setVisible(has_selection)
         self.create_annotation_button.setEnabled(
-            bool(editable and has_concept and supported and self.waveform.selection)
+            bool(
+                editable
+                and has_concept
+                and supported
+                and (self.waveform.selection or self.geometry_combo.currentData() == "point")
+            )
         )
         self.update_annotation_button.setEnabled(bool(editable and has_selection and supported))
         self.editor_mode.setText(
@@ -890,7 +933,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot()
     def _create_annotation(self) -> None:
-        if self.waveform.selection is None:
+        if self.waveform.selection is None and self.geometry_combo.currentData() != "point":
             self._show_error("Select an interval on the audio view before creating an annotation")
             return
         choice = self._current_concept_choice()
@@ -951,6 +994,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_actions()
 
     def _populate_editor(self, annotation: SignalAnnotation) -> None:
+        self._refresh_concepts()
         for index in range(self.concept_combo.count()):
             choice = self.concept_combo.itemData(index)
             if isinstance(choice, ConceptChoice) and choice.reference == annotation.concept_ref:
@@ -1180,6 +1224,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _seek_sample(self, sample: int) -> None:
         session = self.controller.session
+        if session is not None and self._selected_annotation_id is None:
+            self.start_sample.setValue(min(sample, session.audio.asset.frame_count - 1))
         if session is not None and self._player.isSeekable():
             self._player.setPosition(round(sample * 1000 / session.audio.asset.sample_rate_hz))
         elif session is not None:

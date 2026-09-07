@@ -11,13 +11,25 @@ import soundfile as sf  # type: ignore[import-untyped]
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from gui.spectrogram import SpectrogramPreview
-from models import SignalAnnotation
+from models import ConceptRef, LibraryEntry, SignalAnnotation
 
 _EDGE_GRAB_DISTANCE = 10
 
 
-def annotation_label(annotation: SignalAnnotation) -> str:
-    return (annotation.label or "").strip() or "Unlabeled"
+def annotation_label(
+    annotation: SignalAnnotation,
+    definitions: dict[ConceptRef, LibraryEntry] | None = None,
+) -> str:
+    explicit = (annotation.label or "").strip()
+    if explicit:
+        return explicit
+    entry = (definitions or {}).get(annotation.concept_ref)
+    if entry is not None:
+        symbol = entry.metadata.get("ipa_symbol")
+        if isinstance(symbol, str) and symbol.strip():
+            return symbol
+        return entry.display_name
+    return str(annotation.concept_ref)
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +206,7 @@ class WaveformView(QtWidgets.QWidget):
         self.show_spectrogram = False
         self._spectrogram_message = "Preparing spectrogram..."
         self._annotations: tuple[SignalAnnotation, ...] = ()
+        self.definitions: dict[ConceptRef, LibraryEntry] = {}
         self._frame_count = 1
         self._sample_rate_hz = 1
         self._selected_annotation_id: UUID | None = None
@@ -351,7 +364,9 @@ class WaveformView(QtWidgets.QWidget):
             if selected and self._preview:
                 start, end = self._preview
             x = self.sample_to_x(start)
-            right = self.sample_to_x(end) if end is not None else x + 3
+            if end is None:
+                x -= 4
+            right = self.sample_to_x(end) if end is not None else x + 8
             rect = QtCore.QRectF(x, lane.top() + 3, max(3, right - x), lane.height() - 6)
             self._annotation_rects[annotation.id] = rect.intersected(lane)
             painter.fillRect(rect, QtGui.QColor("#337ba0" if selected else "#345548"))
@@ -361,7 +376,7 @@ class WaveformView(QtWidgets.QWidget):
                 painter.drawText(
                     rect.adjusted(5, 0, 0, 0),
                     QtCore.Qt.AlignmentFlag.AlignVCenter,
-                    annotation_label(annotation),
+                    annotation_label(annotation, self.definitions),
                 )
         handle = self._boundary or self._hovered_edge
         if handle is not None:
@@ -533,7 +548,9 @@ class WaveformView(QtWidgets.QWidget):
             for annotation in self._annotations:
                 left = self.sample_to_x(annotation.geometry.start_sample)
                 end = annotation.geometry.end_sample
-                right = self.sample_to_x(end) if end is not None else left + 3
+                if end is None:
+                    left -= 4
+                right = self.sample_to_x(end) if end is not None else left + 8
                 self._annotation_rects[annotation.id] = QtCore.QRectF(
                     left,
                     13,

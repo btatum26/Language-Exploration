@@ -1,0 +1,6 @@
+{
+  "namespace": "core",
+  "name": "Core annotations",
+  "version": "0.1",
+  "purpose": "Sparse manual annotation of speech, silence, non-speech events, and named points."
+}

@@ -169,7 +169,8 @@ The core model allows exact geometric duplicates, partial overlap, full containm
 `SignalAnnotation.label` is optional free text naming this occurrence. It is independent of the
 concept reference, library-defined attributes, and note. Labels belong to revision snapshots and
 follow the normal edit/save history. Existing JSON without `label` loads with `label=None`; the
-GUI displays **Unlabeled** when the label is absent or blank.
+GUI displays the exact pinned definition's IPA symbol or display name when the label is absent
+or blank, with a full concept-reference fallback. Display fallbacks never modify annotation data.
 
 `attributes` is JSON containing occurrence-specific values such as word text, a producer phone label, pitch summaries, breath direction, detector measurements, or optional display parameters. It must validate against the referenced library entry's JSON Schema.
 

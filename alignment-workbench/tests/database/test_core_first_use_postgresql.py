@@ -170,3 +170,14 @@ def test_two_initializers_race_on_identity_and_publication(core_store, tmp_path,
     api = make_api(SqlAlchemyPersistence(factory), tmp_path)
     assert len(api.libraries.list()) == 1
     assert api.libraries.list_versions(results[0].library_id) == (results[0],)
+
+
+def test_all_bundles_persist_metadata_pins_and_annotations(core_store, tmp_path):
+    from tests.test_bundled_libraries import exercise_bundles
+
+    store, factory = core_store
+    api = make_api(store, tmp_path)
+    exercise_bundles(api, tmp_path)
+    expected = api.ensure_bundled_libraries()
+    restarted = make_api(SqlAlchemyPersistence(factory), tmp_path)
+    assert restarted.ensure_bundled_libraries() == expected

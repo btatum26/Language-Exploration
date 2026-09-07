@@ -1,0 +1,6 @@
+{
+  "namespace": "phonetics",
+  "name": "Phonetics",
+  "version": "0.1",
+  "purpose": "Starter inventory of 29 IPA sounds; not complete IPA coverage."
+}

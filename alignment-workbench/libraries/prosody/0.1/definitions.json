@@ -1,0 +1,47 @@
+[
+  {
+    "entry_key": "pitch-rise",
+    "display_name": "Pitch rise",
+    "description": "A perceived upward pitch movement over this interval.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {},
+    "metadata": {}
+  },
+  {
+    "entry_key": "pitch-fall",
+    "display_name": "Pitch fall",
+    "description": "A perceived downward pitch movement over this interval.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {},
+    "metadata": {}
+  },
+  {
+    "entry_key": "pitch-steady",
+    "display_name": "Pitch steady",
+    "description": "A perceived approximately level pitch over this interval.",
+    "allowed_geometry_types": [
+      "time_interval"
+    ],
+    "attribute_schema": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "validation_hints": {},
+    "display_hints": {},
+    "metadata": {}
+  }
+]

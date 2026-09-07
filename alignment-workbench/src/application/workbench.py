@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from application.contracts import AudioStorageHandler, CreateRecordingCommand, RecoveryOutbox
-from application.core_library import ensure_core_library
+from application.core_library import ensure_bundled_libraries, ensure_core_library
 from application.edit_session import RecordingEditSession
 from application.handlers import (
     LibraryHandler,
@@ -68,6 +68,9 @@ class WorkbenchAPI:
 
     def list_annotation_libraries(self) -> tuple[AnnotationLibraryListItem, ...]:
         return self._libraries.list_items()
+
+    def ensure_bundled_libraries(self) -> tuple[LibraryVersion, ...]:
+        return ensure_bundled_libraries(self._libraries)
 
     def ensure_core_library(self) -> LibraryVersion:
         return ensure_core_library(self._libraries)

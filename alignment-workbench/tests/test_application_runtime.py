@@ -106,6 +106,8 @@ def test_application_startup_and_shutdown_are_explicit_and_idempotent(
     assert application.start() is application
     assert application.start() is application
     assert application.started
+    assert {v.version_label for v in persistence.versions.values()} == {"0.1"}
+    assert len(persistence.versions) == 3
     assert application.list_recordings() == ()
     assert application.list_annotation_libraries() == ()
     assert tunnel.start_calls == 1

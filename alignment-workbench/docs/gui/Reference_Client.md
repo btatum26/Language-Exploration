@@ -14,7 +14,7 @@ Annotation gestures commit through the edit session only on release. Audio analy
 workbench responsibility outside the data-handler layer. Existing pending/conflict recovery
 rules and the application's owned SSH/database lifecycle remain in place.
 
-## Launch and core initialization
+## Launch and bundled initialization
 
 Configure `.env`, run `uv run alembic upgrade head`, leave the configured local database port free,
 and run from `alignment-workbench`:
@@ -25,14 +25,14 @@ uv run python src/main.py
 ```
 
 Startup opens its hidden SSH tunnel, checks PostgreSQL/schema and local storage availability,
-then calls `WorkbenchAPI.ensure_core_library()` before creating the window and refreshing its
+then calls `WorkbenchAPI.ensure_bundled_libraries()` before creating the window and refreshing its
 catalog. This operation uses the existing library creation/publication handler and
 `library_content_sha256()`; it is content initialization, not a schema migration.
 
-The persisted publication is **Core annotations**, namespace `core`, version **0.1**, with one
-entry: **Test annotation**, reference **`core@0.1:test`**. Its description is "A general-purpose
-time interval for testing manual annotation." It supports only `time_interval`, and its attribute
-schema is `{"type": "object"}` with no required attributes.
+The persisted publications are **Core annotations** (7 entries), **Phonetics** (29 starter IPA
+sounds), and **Prosody** (3 qualitative pitch contours), all version **0.1**. See
+[Bundled libraries](../application-api/Bundled_Libraries.md) for inventories, format, source,
+and the concrete fresh-database transition for an existing test-only core publication.
 
 Repeated startups reuse the same publication, including its real content hash. A core identity
 without version 0.1 receives that exact publication. Concurrent initializers re-read and verify
@@ -50,12 +50,13 @@ policy. Other callers still explicitly supply `CreateRecordingCommand.libraries`
 
 1. Use **Import Recording**, choose a short PCM WAV or MP3, and supply a name and language.
 2. Wait for the waveform. Revision one is already saved with the exact `core@0.1` pin and its
-   canonical content hash. **Test annotation** and **Time Interval** are selected automatically.
+   canonical content hash. **Silence** and **Time Interval** are selected automatically.
 3. Drag across the waveform below the annotation lane to select an interval. Either direction
    works; coordinates clamp to the recording. Shading and readouts show start, end and duration
    in seconds, with exact sample values retained.
 4. Enter an optional **Label**, adjust sample boundaries, or enter a note in **New annotation** mode. Use
-   **Create annotation**. Creation requires a waveform selection; no one-sample default is used.
+   **Create annotation**. Interval creation requires a waveform selection. For a marker, choose **marker** and click
+   a waveform position or enter **Start sample**; no interval is required.
 5. The new annotation is selected in the table, lane and editor. Change the label, sample bounds or note and
    choose **Apply edits**, or hover over an interval label's left/right edge in the annotation lane.
    A horizontal resize cursor and highlighted edge show where to drag its start/end time, with a
@@ -75,8 +76,9 @@ policy. Other callers still explicitly supply `CreateRecordingCommand.libraries`
 **Label** is the annotation's own display text. It appears in the table's first column and on the
 annotation bar, independently of its concept and note. Set it before creation or edit it with
 **Apply edits**; label changes use the same undo/redo and revision-save path as other edits.
-Blank labels display **Unlabeled**. Older snapshots without a label remain valid and display the
-same fallback; concept keys and existing `attributes["label"]` values are not used as labels.
+Blank labels display the exact pinned definition's IPA symbol or display name, with a full
+concept-reference fallback. Older snapshots without a label remain valid; fallback text is
+never stored as a label. Existing `attributes["label"]` values are not used as labels.
 The `20260906_0003_annotation_label` migration adds a nullable `annotations.label` column without
 backfilling or rewriting historical annotations. Upgrade the database before launching this version.
 
@@ -86,7 +88,8 @@ at the top of the editor. This pins through the edit session, marks it dirty, an
 or removing it through the public edit session, leaves it absent until explicitly added again.
 The editor distinguishes loading, retrieval failure, no published libraries, and no pinned
 libraries. **Refresh Libraries** retries a failed catalog retrieval. General library browsing
-still supports **Pin latest** as a separate explicit action.
+supports **Pin latest** for Phonetics and Prosody as explicit actions. The concept editor
+searches registered names, symbols, and aliases, with a shallow category filter.
 
 ## Navigation and layout
 

@@ -171,10 +171,10 @@ class WorkbenchApplication:
             api.list_recordings(limit=1)
             api.list_annotation_libraries()
             try:
-                api.ensure_core_library()
+                api.ensure_bundled_libraries()
             except PersistenceError as exc:
                 raise WorkbenchStartupError(
-                    "Core library initialization failed: could not read or publish core@0.1"
+                    "Bundled library initialization failed: could not read or publish definitions"
                 ) from exc
         except DatabaseUnavailableError as exc:
             self._close_infrastructure(persistence, tunnel)

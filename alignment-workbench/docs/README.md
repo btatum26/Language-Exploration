@@ -32,3 +32,5 @@ This directory describes the implemented domain, application, and persistence bo
 - Desktop presentation and interaction behavior belongs in `gui/`.
 - Test coverage belongs in `testing/`.
 - Complete examples remain in dedicated files rather than being duplicated across prose documents.
+
+- [Bundled annotation libraries](application-api/Bundled_Libraries.md): inventories, file format, GUI use, and placeholder transition.

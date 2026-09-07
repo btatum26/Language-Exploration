@@ -29,12 +29,17 @@ def test_core_initialization_is_exact_and_idempotent(tmp_path: Path) -> None:
     assert api.libraries.get(version.library_id).name == "Core annotations"
     assert version.version_label == "0.1"
     assert version.content_sha256 == library_content_sha256(version)
-    (entry,) = version.entries
-    assert entry.entry_key == "test"
-    assert entry.display_name == "Test annotation"
-    assert entry.description == "A general-purpose time interval for testing manual annotation."
-    assert entry.allowed_geometry_types == ("time_interval",)
-    assert entry.attribute_schema == {"type": "object"}
+    assert [e.entry_key for e in version.entries] == [
+        "silence",
+        "unknown",
+        "word",
+        "syllable",
+        "noise",
+        "breath",
+        "marker",
+    ]
+    assert all(e.allowed_geometry_types == ("time_interval",) for e in version.entries[:-1])
+    assert version.entries[-1].allowed_geometry_types == ("point",)
 
 
 def test_missing_publication_does_not_rewrite_a_later_version(tmp_path: Path) -> None:

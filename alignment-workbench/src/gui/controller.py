@@ -150,7 +150,8 @@ class ConceptChoice:
 
     @property
     def display_text(self) -> str:
-        return f"{self.entry.display_name} — {self.reference}"
+        symbol = self.entry.metadata.get("ipa_symbol", "")
+        return f"{symbol} {self.entry.display_name} — {self.reference}".strip()
 
 
 @dataclass(frozen=True, slots=True)

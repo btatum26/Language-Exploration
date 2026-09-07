@@ -51,4 +51,4 @@ def test_bar_paints_annotation_label_and_unlabeled_fallback(qtbot, monkeypatch):
         (annotation.model_copy(update={"label": None}),), frame_count=800, sample_rate_hz=8000
     )
     view.grab()
-    assert "Unlabeled" in painted and "Named interval" not in painted
+    assert "core@0.1:test" in painted and "Named interval" not in painted

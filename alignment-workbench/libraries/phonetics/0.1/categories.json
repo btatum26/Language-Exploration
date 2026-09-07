@@ -1,0 +1,10 @@
+{
+  "vowel": {
+    "name": "Vowels",
+    "description": "Sounds described by height, backness, and rounding."
+  },
+  "consonant": {
+    "name": "Consonants",
+    "description": "Sounds described by voicing, place, and manner."
+  }
+}
