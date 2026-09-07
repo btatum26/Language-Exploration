@@ -28,6 +28,22 @@ def test_spectrogram_resolves_tone_and_viewport(tmp_path, extension):
     assert max(column) > 200
 
 
+@pytest.mark.parametrize("rate", [16_000, 44_100, 48_000])
+def test_spectrogram_caps_frequency_without_rescaling_tones(tmp_path, rate):
+    path = tmp_path / "high-rate.wav"
+    samples = 0.5 * np.sin(2 * np.pi * 6_000 * np.arange(rate // 10) / rate)
+    sf.write(path, samples, rate)
+    preview = load_spectrogram(path, 0, len(samples))
+    assert preview.maximum_frequency_hz == 8_000
+    column = [preview.image.pixelIndex(5, y) for y in range(preview.image.height())]
+    peak_hz = (1 - np.argmax(column) / (len(column) - 1)) * 8_000
+    assert abs(peak_hz - 6_000) <= 50
+    if rate > 24_000:
+        sf.write(path, 0.5 * np.sin(2 * np.pi * 12_000 * np.arange(rate // 10) / rate), rate)
+        preview = load_spectrogram(path, 0, len(samples))
+        assert max(preview.image.pixelIndex(5, y) for y in range(preview.image.height())) < 30
+
+
 def test_spectrogram_silence_short_clip_and_opposite_phase_stereo(tmp_path):
     path = tmp_path / "audio.wav"
     sf.write(path, np.zeros(3), 8_000)

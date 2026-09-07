@@ -13,6 +13,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from gui.spectrogram import SpectrogramPreview
 from models import SignalAnnotation
 
+_EDGE_GRAB_DISTANCE = 10
+
 
 def annotation_label(annotation: SignalAnnotation) -> str:
     return (annotation.label or "").strip() or "Unlabeled"
@@ -182,6 +184,7 @@ class WaveformView(QtWidgets.QWidget):
         super().__init__(parent)
         self.setMinimumHeight(150)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        self.setMouseTracking(True)
         self.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding
         )
@@ -206,6 +209,8 @@ class WaveformView(QtWidgets.QWidget):
         self._original_selection: tuple[int, int] | None = None
         self._original_viewport = (0, 1)
         self._boundary: tuple[UUID, int, int, str] | None = None
+        self._hovered_edge: tuple[UUID, int, int, str] | None = None
+        self._hover_position: QtCore.QPointF | None = None
         self._preview: tuple[int, int] | None = None
 
     def set_loading(self, message: str = "Preparing waveform...") -> None:
@@ -214,6 +219,7 @@ class WaveformView(QtWidgets.QWidget):
 
     def set_error(self, message: str) -> None:
         self._envelope = None
+        self._update_hover(None)
         self._message = message
         self.update()
 
@@ -223,6 +229,7 @@ class WaveformView(QtWidgets.QWidget):
         self.spectrogram = None
         self._spectrogram_message = "Preparing spectrogram..."
         self._annotations = ()
+        self._update_hover(None)
         self._selected_annotation_id = None
         self._playhead_seconds = 0.0
         self._message = "Open a recording to prepare its waveform"
@@ -269,15 +276,20 @@ class WaveformView(QtWidgets.QWidget):
         self._frame_count = max(1, frame_count)
         self._sample_rate_hz = max(1, sample_rate_hz)
         self._preview = None
+        if self._press is None:
+            self._update_hover(self._hover_position)
         self.update()
 
     def set_editable(self, editable: bool) -> None:
         self._editable = editable
         if not editable:
             self.cancel_gesture()
+        self._update_hover(self._hover_position)
 
     def set_selected_annotation(self, annotation_id: UUID | None) -> None:
         self._selected_annotation_id = annotation_id
+        if self._press is None:
+            self._update_hover(self._hover_position)
         self.update()
 
     def set_playhead_seconds(self, seconds: float) -> None:
@@ -297,6 +309,8 @@ class WaveformView(QtWidgets.QWidget):
         span = max(1, min(self._frame_count, end - start))
         start = max(0, min(self._frame_count - span, start))
         self.viewport = (start, start + span)
+        if self._press is None:
+            self._update_hover(self._hover_position)
         self.update()
         self.viewport_changed.emit(*self.viewport)
 
@@ -349,6 +363,16 @@ class WaveformView(QtWidgets.QWidget):
                     QtCore.Qt.AlignmentFlag.AlignVCenter,
                     annotation_label(annotation),
                 )
+        handle = self._boundary or self._hovered_edge
+        if handle is not None:
+            _, start, end, edge = handle
+            if self._boundary and self._preview:
+                start, end = self._preview
+            x = self.sample_to_x(start if edge == "start" else end)
+            painter.setPen(QtGui.QPen(QtGui.QColor("#ffffff"), 4))
+            painter.drawLine(
+                QtCore.QPointF(x, lane.top() + 3), QtCore.QPointF(x, lane.bottom() - 3)
+            )
         wave_bounds = bounds.adjusted(0, 44, 0, 0)
         if self.show_spectrogram and self._envelope is not None:
             self._paint_spectrogram(painter, wave_bounds)
@@ -424,6 +448,62 @@ class WaveformView(QtWidgets.QWidget):
                 painter.drawLine(previous, point)
             previous = point
 
+    def _edge_at(self, position: QtCore.QPointF | None) -> tuple[UUID, int, int, str] | None:
+        """Share exact hit testing between hover and press, using current samples."""
+        if (
+            position is None
+            or not self.audio_ready
+            or not self._editable
+            or not QtCore.QRectF(0, 10, self.width(), 36).contains(position)
+        ):
+            return None
+        candidates: list[tuple[float, bool, int, str, str, UUID, int, int]] = []
+        for annotation in self._annotations:
+            geometry = annotation.geometry
+            if geometry.type != "time_interval" or geometry.end_sample is None:
+                continue
+            start, end = geometry.start_sample, geometry.end_sample
+            for edge, sample in (("start", start), ("end", end)):
+                # A bar clipped by the viewport does not gain a new boundary.
+                if not self.viewport[0] <= sample <= self.viewport[1]:
+                    continue
+                distance = abs(position.x() - self.sample_to_x(sample))
+                if distance <= _EDGE_GRAB_DISTANCE:
+                    candidates.append(
+                        (
+                            distance,
+                            annotation.id != self._selected_annotation_id,
+                            end - start,
+                            str(annotation.id),
+                            edge,
+                            annotation.id,
+                            start,
+                            end,
+                        )
+                    )
+        if not candidates:
+            return None
+        _, _, _, _, edge, annotation_id, start, end = min(candidates)
+        return annotation_id, start, end, edge
+
+    def _update_hover(self, position: QtCore.QPointF | None) -> None:
+        self._hover_position = position
+        edge = self._edge_at(position)
+        if edge != self._hovered_edge:
+            self._hovered_edge = edge
+            self.update()
+        if edge is not None:
+            self.setCursor(QtCore.Qt.CursorShape.SizeHorCursor)
+            self.setToolTip(f"Drag to change annotation {edge[3]} time")
+        else:
+            self.unsetCursor()
+            self.setToolTip("")
+
+    def leaveEvent(self, event: QtCore.QEvent) -> None:
+        if self._press is None:
+            self._update_hover(None)
+        super().leaveEvent(event)
+
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if self._envelope is None or not self._editable:
             return
@@ -439,6 +519,14 @@ class WaveformView(QtWidgets.QWidget):
             self._press = None
             return
         elif event.position().y() <= 46:
+            boundary = self._edge_at(event.position())
+            if boundary is not None:
+                self._gesture = "boundary"
+                self._boundary = boundary
+                self._update_hover(event.position())
+                self.annotation_selected.emit(boundary[0])
+                event.accept()
+                return
             # Input can arrive before the next repaint after undo/redo. Hit-test
             # authoritative samples, never rectangles left over from a paint.
             self._annotation_rects = {}
@@ -460,26 +548,15 @@ class WaveformView(QtWidgets.QWidget):
             if candidates:
                 annotation_id = min(candidates)[2]
                 self.annotation_selected.emit(annotation_id)
-                annotation = next(a for a in self._annotations if a.id == annotation_id)
                 self._gesture = "annotation"
-                geom = annotation.geometry
-                if geom.type == "time_interval" and geom.end_sample is not None:
-                    edges = [
-                        (abs(event.position().x() - self.sample_to_x(geom.start_sample)), "start"),
-                        (abs(event.position().x() - self.sample_to_x(geom.end_sample)), "end"),
-                    ]
-                    distance, edge = min(edges)
-                    if distance <= 7:
-                        self._gesture = "boundary"
-                        self._boundary = (annotation_id, geom.start_sample, geom.end_sample, edge)
         event.accept()
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         if self._press is None:
+            self._update_hover(event.position())
             return
-        if (
-            event.position() - self._press
-        ).manhattanLength() >= QtWidgets.QApplication.startDragDistance():
+        threshold = 1 if self._gesture == "boundary" else QtWidgets.QApplication.startDragDistance()
+        if (event.position() - self._press).manhattanLength() >= threshold:
             self._dragged = True
         if not self._dragged:
             return
@@ -492,6 +569,13 @@ class WaveformView(QtWidgets.QWidget):
             self.selection_changed.emit(self.selection)
         elif self._gesture == "boundary" and self._boundary:
             _, start, end, edge = self._boundary
+            # Preserve the grab offset so the wider handle does not make the edge jump.
+            delta = round(
+                (event.position().x() - self._press.x())
+                * (self.viewport[1] - self.viewport[0])
+                / max(1, self.width() - 20)
+            )
+            sample = max(0, min(self._frame_count, (start if edge == "start" else end) + delta))
             self._preview = (sample, end) if edge == "start" else (start, sample)
         elif self._gesture == "pan":
             start, end = self._original_viewport
@@ -518,6 +602,9 @@ class WaveformView(QtWidgets.QWidget):
         self._press = None
         self._boundary = None
         self._preview = None
+        self._update_hover(
+            event.position() if self.rect().contains(event.position().toPoint()) else None
+        )
         self.update()
 
     def cancel_gesture(self) -> None:
@@ -527,6 +614,7 @@ class WaveformView(QtWidgets.QWidget):
         self._press = None
         self._boundary = None
         self._preview = None
+        self._update_hover(None)
         self.update()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:

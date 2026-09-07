@@ -45,7 +45,7 @@ def click_editor(qtbot, window, widget):
     qtbot.mouseClick(widget, QtCore.Qt.MouseButton.LeftButton)
 
 
-def exercise_first_use(qtbot, api, tmp_path, monkeypatch, *, size=(1024, 768)):
+def exercise_first_use(qtbot, api, tmp_path, monkeypatch, *, size=(1024, 768), spectrogram=False):
     """Same real GUI workflow is exercised with memory and PostgreSQL stores."""
     core = api.ensure_core_library()
     QtWidgets.QApplication.instance().setFont(QtGui.QFont("Segoe UI", 9))
@@ -62,6 +62,9 @@ def exercise_first_use(qtbot, api, tmp_path, monkeypatch, *, size=(1024, 768)):
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *a, **kw: next(answers))
     window.import_action.trigger()
     qtbot.waitUntil(lambda: window.waveform._envelope is not None)
+    if spectrogram:
+        window.audio_view_toggle.setCurrentIndex(1)
+        qtbot.waitUntil(lambda: window.waveform.spectrogram is not None)
     session = window.controller.session
     assert session is not None
     assert not session.dirty
@@ -113,6 +116,19 @@ def exercise_first_use(qtbot, api, tmp_path, monkeypatch, *, size=(1024, 768)):
     assert window.end_sample.value() == 550
     assert window.label_edit.text() == "Edited interval"
     assert window.annotation_table.item(0, 6).text() == "Edited interval"
+    # Hover exposes the start handle; resizing commits once and supports undo/redo.
+    start_edge = QtCore.QPoint(round(window.waveform.sample_to_x(120)), 25)
+    qtbot.mouseMove(window.waveform, start_edge)
+    assert window.waveform.cursor().shape() == QtCore.Qt.CursorShape.SizeHorCursor
+    drag(window.waveform, 120, 80, lane=True)
+    resized_start = session.annotations[0]
+    assert abs(resized_start.geometry.start_sample - 80) <= 1
+    assert resized_start.geometry.end_sample == 550
+    window.undo_action.trigger()
+    assert session.annotations == (edited,)
+    window.redo_action.trigger()
+    assert session.annotations == (resized_start,)
+    window.undo_action.trigger()
     qtbot.wait(10)
     drag(window.waveform, 550, 680, lane=True)
     dragged = session.annotations[0]
@@ -181,11 +197,12 @@ def exercise_first_use(qtbot, api, tmp_path, monkeypatch, *, size=(1024, 768)):
 
 
 @pytest.mark.parametrize("size", [(1024, 768), (1340, 850)])
-def test_real_session_first_use(qtbot, tmp_path, monkeypatch, size):
+@pytest.mark.parametrize("spectrogram", [False, True])
+def test_real_session_first_use(qtbot, tmp_path, monkeypatch, size, spectrogram):
     store = MemoryPersistenceStore()
     api = make_api(store, tmp_path)
     recording_id, annotation, core = exercise_first_use(
-        qtbot, api, tmp_path, monkeypatch, size=size
+        qtbot, api, tmp_path, monkeypatch, size=size, spectrogram=spectrogram
     )
     reopened_api = make_api(store, tmp_path)
     assert reopened_api.ensure_core_library() == core

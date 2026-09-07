@@ -57,7 +57,10 @@ policy. Other callers still explicitly supply `CreateRecordingCommand.libraries`
 4. Enter an optional **Label**, adjust sample boundaries, or enter a note in **New annotation** mode. Use
    **Create annotation**. Creation requires a waveform selection; no one-sample default is used.
 5. The new annotation is selected in the table, lane and editor. Change the label, sample bounds or note and
-   choose **Apply edits**, or drag an interval's left/right edge in the annotation lane. A boundary
+   choose **Apply edits**, or hover over an interval label's left/right edge in the annotation lane.
+   A horizontal resize cursor and highlighted edge show where to drag its start/end time, with a
+   10-pixel grab area on either side. No prior selection is needed. Overlapping labels use the
+   nearest edge, preferring the selected label when edges coincide. A boundary
    drag previews locally and creates one undo step on release. Escape cancels the preview;
    invalid boundaries restore the authoritative geometry and show a concise error.
 6. Use **Undo**, **Redo**, or **Delete selected**. The table, editor and overlay follow the session.
@@ -90,7 +93,8 @@ still supports **Pin latest** as a separate explicit action.
 - **Audio view** above the plot switches between **Waveform** (default) and **Spectrogram**.
   Both retain the same viewport, selection, annotations and playback position. Click, drag,
   zoom and pan work in either view. The choice affects only the display, not saved revisions.
-  Spectrogram frequency runs from 0 Hz at the bottom to half the sample rate at the top;
+  Spectrogram frequency runs from 0 Hz at the bottom to 8,000 Hz at the top (or half the sample
+  rate when that is lower);
   brighter colors show stronger energy on a fixed -90 to 0 dB amplitude scale.
   WAV and MP3 previews load on a worker after navigation settles and are reused when toggling
   back at the same viewport. Analysis uses 25 ms Hann windows (capped at 4,096 samples),

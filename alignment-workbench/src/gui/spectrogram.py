@@ -35,9 +35,14 @@ def load_spectrogram(
         end = max(start + 1, min(end, frames))
         window_size = min(4_096, max(32, round(rate * 0.025)))
         fft_size = 1 << (window_size - 1).bit_length()
+        maximum_frequency_hz = min(8_000.0, rate / 2)
+        fft_frequencies = np.fft.rfftfreq(fft_size, d=1 / rate)
+        display_frequencies = np.linspace(
+            0, maximum_frequency_hz, int(maximum_frequency_hz * fft_size / rate) + 1
+        )
         window = np.hanning(window_size)
         columns = max(1, min(maximum_columns, int(np.ceil((end - start) / (rate * 0.01)))))
-        pixels = np.empty((fft_size // 2 + 1, columns), dtype=np.uint8)
+        pixels = np.empty((len(display_frequencies), columns), dtype=np.uint8)
         cache_start = 0
         cache = np.empty((0, source.channels), dtype=np.float32)
         # Decode nearby windows together. MP3 seeks need decoder preroll for the
@@ -59,6 +64,7 @@ def load_spectrogram(
             padded[offset : offset + len(block)] = block
             spectrum = np.fft.rfft(padded * window[:, None], n=fft_size, axis=0)
             power = np.mean(np.abs(spectrum * (2 / window.sum())) ** 2, axis=1)
+            power = np.interp(display_frequencies, fft_frequencies, power)
             db = 10 * np.log10(np.maximum(power, 1e-12))
             pixels[:, column] = np.clip((db + 90) * (255 / 90), 0, 255).astype(np.uint8)
 
@@ -73,4 +79,4 @@ def load_spectrogram(
         axis=1,
     ).astype(np.uint8)
     image.setColorTable([QtGui.qRgb(int(r), int(g), int(b)) for r, g, b in palette])
-    return SpectrogramPreview(image, start, end, rate / 2)
+    return SpectrogramPreview(image, start, end, maximum_frequency_hz)
