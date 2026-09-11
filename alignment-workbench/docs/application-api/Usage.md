@@ -6,7 +6,7 @@
 
 ## Runnable application
 
-The process composition root loads `.env`, validates configuration, starts and owns the SSH tunnel, owns the PostgreSQL pool and local storage, builds one `WorkbenchAPI`, checks storage/schema availability and initializes the three bundled libraries during startup, and disposes the pool before stopping the tunnel on exit. No separately launched tunnel is required or accepted.
+The process composition root loads `.env`, validates configuration, starts and owns the SSH tunnel, owns the PostgreSQL pool and local storage, builds one `WorkbenchAPI`, checks storage/schema availability and initializes the three bundled libraries during startup, and disposes the pool before stopping the tunnel on exit. No separately launched tunnel is required or accepted. A guardian process owns SSH and watches an application-owned pipe; EOF stops SSH even when the application crashes or is forcibly closed. Existing listeners are not automatically terminated or reused.
 
 Required configuration names are:
 

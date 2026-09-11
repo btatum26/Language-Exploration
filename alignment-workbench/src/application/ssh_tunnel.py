@@ -9,6 +9,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite
+from pathlib import Path
 from types import TracebackType
 
 from sqlalchemy.engine import make_url
@@ -121,6 +122,8 @@ class SshTunnel:
         try:
             self._process = subprocess.Popen(
                 [
+                    sys.executable,
+                    str(Path(__file__).with_name("tunnel_guardian.py")),
                     self.config.executable,
                     "-o",
                     "BatchMode=yes",
@@ -129,7 +132,7 @@ class SshTunnel:
                     "-N",
                     self.config.ssh_alias,
                 ],
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 text=True,
@@ -164,7 +167,10 @@ class SshTunnel:
         self._process = None
         if process is None or process.poll() is not None:
             return
-        process.terminate()
+        # Closing this pipe asks the guardian to stop SSH. The OS also closes it
+        # if this application crashes or is forcibly terminated.
+        if process.stdin is not None:
+            process.stdin.close()
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:

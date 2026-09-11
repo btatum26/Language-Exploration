@@ -1,167 +1,176 @@
-# Desktop Reference Client
+# Desktop workstation
 
-**Status:** Implemented first-use manual annotation workflow
+The desktop entry point now opens `WorkstationWindow`: a fixed transport toolbar,
+a vertically scrollable multitrack timeline, and one resizable annotation inspector.
+Recordings, libraries, and the annotation table are not permanent main-window panels.
 
-## Boundary and ownership
+## Launch
 
-The desktop client calls `WorkbenchAPI` and `RecordingEditSession`. GUI classes contain no
-SQLAlchemy access or database queries. The edit session owns recording validation, mutations,
-undo/redo, library pins and revision saves. Selection, viewport, playhead, selected annotation ID
-and boundary-drag previews belong to the GUI and are never stored in recording snapshots.
-
-Catalog reads, import/open/save operations, library retrieval and audio decoding use workers.
-Annotation gestures commit through the edit session only on release. Audio analysis remains a
-workbench responsibility outside the data-handler layer. Existing pending/conflict recovery
-rules and the application's owned SSH/database lifecycle remain in place.
-
-## Launch and bundled initialization
-
-Configure `.env`, run `uv run alembic upgrade head`, leave the configured local database port free,
-and run from `alignment-workbench`:
+From `alignment-workbench`, configure `.env` with `REGISTRY_ALIGN_DATABASE_URL`
+(`postgresql+psycopg`), `ALIGNMENT_WORKBENCH_AUDIO_ROOT`, and, if needed,
+`ALIGNMENT_WORKBENCH_RECOVERY_ROOT` and `ALIGNMENT_WORKBENCH_SSH_ALIAS`.
+The application owns its SSH tunnel, PostgreSQL pool, and shutdown. A small
+standard-library guardian owns SSH and watches a pipe from the application;
+closing the application normally or forcibly closes the pipe and stops SSH.
+Other applications' active tunnels are never reused or terminated automatically. Leave its
+configured local tunnel endpoint free. Apply the existing migrations before launch.
 
 ```powershell
 $env:UV_CACHE_DIR = '.uv-cache'
 uv run python src/main.py
 ```
 
-Startup opens its hidden SSH tunnel, checks PostgreSQL/schema and local storage availability,
-then calls `WorkbenchAPI.ensure_bundled_libraries()` before creating the window and refreshing its
-catalog. This operation uses the existing library creation/publication handler and
-`library_content_sha256()`; it is content initialization, not a schema migration.
+Startup retains bundled Core, Phonetics and Prosody publication initialization.
+See [Bundled libraries](../application-api/Bundled_Libraries.md). No new migration
+or recording/domain API redesign is required by the workstation.
 
-The persisted publications are **Core annotations** (7 entries), **Phonetics** (29 starter IPA
-sounds), and **Prosody** (3 qualitative pitch contours), all version **0.1**. See
-[Bundled libraries](../application-api/Bundled_Libraries.md) for inventories, format, source,
-and the concrete fresh-database transition for an existing test-only core publication.
+## Recording workflow
 
-Repeated startups reuse the same publication, including its real content hash. A core identity
-without version 0.1 receives that exact publication. Concurrent initializers re-read and verify
-the winner after a rejected competing write. Conflicting content under `core@0.1` stops startup
-with a clear error and leaves the existing publication intact. No later version is substituted.
-The storage contract also requires unique content hashes within a library: if identical required
-content already exists under a different version label, startup reports that conflict. It does
-not rename that publication or change the schema to manufacture version 0.1.
+**+ Add recording** offers **Record new audio**, **Import audio file**, and
+**Browse existing recordings**. Microphone capture offers device selection, a level
+meter, start/stop, and adding the recorded take through the existing import API.
+Temporary takes are cleaned up after import or cancellation. Import retains
+WAV/MP3 inspection, immutable storage, the core
+publication pin and initial revision save. The recordings dialog offers search,
+duration, revision, audio availability, refresh, add and cancel. Discovery uses
+the existing bounded catalog (up to 500 recordings).
 
-The CLI smoke entry point remains `uv run python src/cli_main.py`. Core initialization applies to
-application startup; automatic inclusion of the core pin in recording creation is a GUI import
-policy. Other callers still explicitly supply `CreateRecordingCommand.libraries`.
+Each recording opens once, initially at workspace time zero. Its track header
+contains its name, mute, solo, waveform/spectrogram selector and overflow menu.
+The menu provides details, track reordering, marker creation, definition refresh,
+and removal. Removing a track closes only its edit session; it never deletes the
+stored recording. Dirty removal prompts to save; cancel keeps the track open.
 
-## First recording
+Drag the clip header to change placement. Drag the audio to select an interval.
+Offsets clamp to zero. Track offsets, order, mute/solo and view state are temporary
+and reset on restart. They are never written into recording revisions. An
+annotation at local 0.5 seconds on a clip offset by 2 seconds displays at 2.5 seconds.
 
-1. Use **Import Recording**, choose a short PCM WAV or MP3, and supply a name and language.
-2. Wait for the waveform. Revision one is already saved with the exact `core@0.1` pin and its
-   canonical content hash. **Silence** and **Time Interval** are selected automatically.
-3. Drag across the waveform below the annotation lane to select an interval. Either direction
-   works; coordinates clamp to the recording. Shading and readouts show start, end and duration
-   in seconds, with exact sample values retained.
-4. Enter an optional **Label**, adjust sample boundaries, or enter a note in **New annotation** mode. Use
-   **Create annotation**. Interval creation requires a waveform selection. For a marker, choose **marker** and click
-   a waveform position or enter **Start sample**; no interval is required.
-5. The new annotation is selected in the table, lane and editor. Change the label, sample bounds or note and
-   choose **Apply edits**, or hover over an interval label's left/right edge in the annotation lane.
-   A horizontal resize cursor and highlighted edge show where to drag its start/end time, with a
-   10-pixel grab area on either side. No prior selection is needed. Overlapping labels use the
-   nearest edge, preferring the selected label when edges coincide. A boundary
-   drag previews locally and creates one undo step on release. Escape cancels the preview;
-   invalid boundaries restore the authoritative geometry and show a concise error.
-6. Use **Undo**, **Redo**, or **Delete selected**. The table, editor and overlay follow the session.
-   Click an annotation or its table row to select it again. Use **New annotation** or make another
-   waveform selection to return to creation mode.
-7. Choose **Save Revision** (`Ctrl+S`). The compact save dialog accepts an optional author and
-   revision message. A successful save shows a new revision and clean state. Pending and conflict
-   results remain distinct from a successful database save.
-8. Close the window, launch again, select the recording and choose **Open Recording**. The saved
-   label, geometry, note and exact library pin are restored.
+## Shared timeline and inspector
 
-**Label** is the annotation's own display text. It appears in the table's first column and on the
-annotation bar, independently of its concept and note. Set it before creation or edit it with
-**Apply edits**; label changes use the same undo/redo and revision-save path as other edits.
-Blank labels display the exact pinned definition's IPA symbol or display name, with a full
-concept-reference fallback. Older snapshots without a label remain valid; fallback text is
-never stored as a label. Existing `attributes["label"]` values are not used as labels.
-The `20260906_0003_annotation_label` migration adds a nullable `annotations.label` column without
-backfilling or rewriting historical annotations. Upgrade the database before launching this version.
+All tracks use one workspace viewport, selection and device-clock playhead.
+The mouse wheel scrolls vertically through tracks. Ctrl+wheel zoom and
+middle-drag/Shift-wheel pan operate on the shared horizontal viewport.
+The toolbar provides fit, zoom to selection, zoom in/out and clear selection;
+the horizontal scrollbar pans all tracks. Tracks start at 280 logical pixels high;
+drag the bottom edge of a track to resize it independently. Track heights are
+preserved when the window resizes or tracks are reordered, with sufficient minimum
+height for annotation lanes. Overflow scrolls vertically. The toolbar stays fixed.
 
-For an older recording without `core@0.1`, use the visible **Use core library (core@0.1)** button
-at the top of the editor. This pins through the edit session, marks it dirty, and requires
-**Save Revision** to persist. Opening never silently changes an older snapshot. Undoing the pin,
-or removing it through the public edit session, leaves it absent until explicitly added again.
-The editor distinguishes loading, retrieval failure, no published libraries, and no pinned
-libraries. **Refresh Libraries** retries a failed catalog retrieval. General library browsing
-supports **Pin latest** for Phonetics and Prosody as explicit actions. The concept editor
-searches registered names, symbols, and aliases, with a shallow category filter.
+Click a track to activate it. Its header is highlighted. Dragging audio opens the
+creation form; clicking an annotation opens the edit form. Annotations from different libraries always occupy separate lanes. Within a
+library, overlapping content splits by category (for example vowels/consonants),
+or definition when no category exists (for example words/syllables). Further
+overlap splits by individual definition, then by occurrence only when necessary.
+Rows are ordered deterministically and do not change when zooming or moving clips.
+Rendering, selection and boundary handles all use the same lane assignment. Seconds fields
+convert to exact recording-local samples through the original editor controls.
+Label, note, concept, geometry and frequency controls retain their existing validation.
+**Revert form** restores the selected annotation; **Cancel / clear selection** returns
+to the empty inspector. Markers remain accessible from the track menu.
 
-## Navigation and layout
+The concept picker searches names, symbols and aliases and filters categories.
+Published library definitions are fetched on workers without changing recordings.
+Creation or an explicit concept update pins the selected publication through the
+existing edit session. Existing namespace pins retain their exact version. Library
+pinning and annotation changes retain the session's separate undo operations.
+Library/version information is secondary in the selected concept, with no permanent
+library browser. Refresh definitions is available from the track menu.
 
-- **Audio view** above the plot switches between **Waveform** (default) and **Spectrogram**.
-  Both retain the same viewport, selection, annotations and playback position. Click, drag,
-  zoom and pan work in either view. The choice affects only the display, not saved revisions.
-  Spectrogram frequency runs from 0 Hz at the bottom to 8,000 Hz at the top (or half the sample
-  rate when that is lower);
-  brighter colors show stronger energy on a fixed -90 to 0 dB amplitude scale.
-  WAV and MP3 previews load on a worker after navigation settles and are reused when toggling
-  back at the same viewport. Analysis uses 25 ms Hann windows (capped at 4,096 samples),
-  averages channel powers, and samples at most 1,200 time columns. Long overviews use spaced
-  windows and can miss brief events; zoom in for finer time detail. Stale results are discarded.
-- Click the waveform to move the playhead and seek playback. A drag selects an interval and
-  does not repeatedly seek. A seek requested while media loads is applied when it becomes seekable.
-- Use the mouse wheel or **Zoom + / Zoom -** for horizontal zoom. Wheel zoom anchors at the cursor.
-- Middle-button drag or Shift+wheel pans horizontally. **Zoom to selection** fits the selected
-  interval; **Fit recording** restores the whole recording; **Clear selection** removes shading.
-- Waveform, annotation lane, timeline, selection and playhead share one sample-based viewport.
-  A bounded whole-recording envelope appears first. After zoom/pan settles, a worker decodes a
-  bounded envelope for that viewport, reaching individual samples at close zoom. Stale results
-  are discarded. Selection/boundary mouse moves do not decode audio.
-- Drag the horizontal divider to resize waveform versus lower panels. Vertical dividers resize
-  navigation, table and editor. The editor scrolls and keeps controls at their useful minimum
-  sizes; form labels wrap to a separate row when needed.
-- **Recording details** expands technical metadata. **Annotation JSON details** expands the
-  deterministic annotation JSON. The table emphasizes seconds and notes; sample values and full
-  references are available in tooltips and the inspector. Frequency fields are hidden for
-  time-only geometry.
+The existing bounded waveform and spectral renderers are reused, including detail
+workers, stale-result checks, MP3 decoding and the 8 kHz/Nyquist frequency cap.
+No placeholder signal rendering is used. Existing polygons can be inspected and
+preserved but are not editable. Attributes/confidence and polygon vertices remain
+available in annotation JSON; dedicated authoring controls are outside this draft.
 
-Geometry type and concept are locked while editing an existing annotation. Create another
-annotation for a different type. Polygon creation and editing are not offered; existing polygons
-can be inspected and are preserved by saves. Time intervals support boundary dragging; existing
-points and time-frequency boxes support the available numeric controls. Attribute authoring,
-polygon vertices, full library authoring, split/merge and automatic analysis remain
-outside this pass. The sample spinboxes currently cover up to 2,147,483,647 samples.
+## Playback
 
-## Playback and shutdown
+One `WorkspacePlayer` mixes into one `QAudioSink` using its processed-audio clock.
+Mute excludes a track; when any track is soloed, only soloed and unmuted tracks
+are audible. Tracks are silent outside their clip placement. Seek, pause and stop
+operate on the workspace. Changing placement or mute/solo flushes queued audio
+and resumes at the current shared position.
 
-The existing `QMediaPlayer` is retained. Play/Pause depends on media readiness and an available
-output device. Loading, invalid media, player errors, seekability and playback state appear beside
-the transport controls. Playback diagnostics survive unrelated annotation/save notices. **Stop**
-resets position to zero. Annotation edits and catalog refreshes do not reset an unchanged source.
+The first mixer emits stereo float PCM at 48 kHz, duplicates mono channels, uses
+linear rate conversion, and clips summed samples to [-1, 1]. It uses the first
+two channels of multichannel sources. It decodes bounded blocks with MP3 preroll,
+closing decoder handles per block. An incompatible/missing output device or decoder
+failure produces a visible error. Higher-quality resampling, multichannel downmix,
+large-session streaming optimization and device selection are later work. There is
+no separate per-track media clock. Automated output checks verify device progression;
+speaker/headphone listening quality still requires a human listening check.
 
-Mutation controls and gestures are disabled during blocking application work, including saving.
-Dirty recordings require an explicit discard before close. The window stops playback and waits
-for its workers; the application then closes PostgreSQL and stops its owned SSH tunnel.
+## Ownership and saves
 
-## Regression verification
+- `workspace.py`: temporary track placement/order/mix state, active track, shared
+  viewport, selection conversion and playhead.
+- `workstation_window.py`: main-window composition, recording dialog and coordinated
+  add/remove/save/recovery/shutdown actions.
+- `track_widget.py`: track header, clip drag handle, timeline wiring and adapter to
+  the original recording editor.
+- `annotation_inspector.py`: seconds fields and form reversion around the existing
+  annotation form and authoritative edit session.
+- `workspace_player.py`: bounded mixer and the single output clock.
+- `waveform.py` / `spectrogram.py`: existing signal renderers and annotation gestures.
 
-`tests/test_core_library.py` exercises real application initialization with a contract store.
-`tests/test_first_use_gui.py` exercises real edit sessions with mouse selection, boundary drags,
-creation, numeric/note edits, cancellation, invalid geometry, undo/redo/delete, explicit pinning,
-polygon preservation, busy-state protection, playback diagnostics and save/reopen.
+The original `main_window.py` remains a tested recording-editor implementation.
+The track adapter reuses its form, action validation and preview workers; its reference
+shell is hidden, and its form and waveform are reparented into the workstation.
+The adapter does not populate or use its annotation table as selection state and
+does not load a per-recording playback source. Extracting the remaining legacy shell
+construction is a later cleanup; recording state is not duplicated.
 
-GUI tests show and render 1024x768 and 1340x850 logical-pixel windows with a normal Windows font.
-They scroll every important editor control into the viewport and use mouse clicks for actions.
-Screenshots are written to `.artifacts/first-use/`. The layout workflow is also checked with
-`QT_SCALE_FACTOR=1.5`. This verifies accessibility and rendering, not only programmatic button calls.
+Undo, redo and Save revision affect the active recording. Save prompts for optional
+author/message. Closing the workspace waits for outstanding work, then saves every
+dirty track before closing any sessions. Cancel, queued/failed saves and conflicts
+keep the workspace open. Pending saves retain their durable recovery files and must
+synchronize before close. **Retry pending saves** is available in the toolbar and
+error banner. Recovery runs sequentially across sessions and blocks editing while
+clean sessions reload. It does not overwrite conflicts or discard pending data.
+Shutdown stops playback and preview workers and closes the existing session/audio
+leases before the application shuts down its owned PostgreSQL/SSH runtime.
 
-`tests/database/test_core_first_use_postgresql.py` creates a fresh migrated disposable schema per
-test. It uses real commits, separate API/persistence instances and fresh windows for save/reopen,
-and synchronized independent database sessions for racing initialization. It also covers a core
-identity without 0.1, a later distinct publication, conflicting 0.1 content, and identical content
-under another immutable label. Supply `TEST_DATABASE_URL` with permission to create disposable
-schemas; these tests never migrate or remove the production schema.
+## Verification
+
+`tests/test_workspace.py` exercises real application edit sessions over the contract
+persistence store with real WAV audio: two simultaneous tracks, waveform/spectrogram,
+shared navigation and playhead, clip dragging, offset/local conversion, overlapping
+lanes, marker creation, inspector create/update/delete/revert paths, all-library
+selection, undo, save-on-close, removal and reopening. Both immediate and real Qt
+worker runners are exercised. A numeric mixer test verifies audio samples for offsets,
+sample rates, stereo/mono, silence, mute and solo. A device-dependent test exercises
+play/pause/seek/stop. Screenshots are written to `.artifacts/workstation/`.
 
 ```powershell
-uv run pytest tests/test_core_library.py tests/test_first_use_gui.py
-uv run pytest tests/database/test_core_first_use_postgresql.py
+uv run pytest tests/test_workspace.py
+uv run pytest
+uv run mypy --python-version 3.13 src
+uv run ruff check src tests
 ```
 
-Windows verification passed Play, Pause, seek, synchronized playhead and Stop using a silent WAV
-and an available output device. Audible output on the user's chosen speakers/headphones remains
-a manual listening check. Tests skip the device-dependent smoke check when no output is available.
+Existing recording-editor, save/recovery, waveform/spectrogram, application and domain
+tests remain regression checks. PostgreSQL integration tests require explicitly
+configured disposable targets (`TEST_DATABASE_URL`, `TEST_RUNTIME_DATABASE_URL`);
+never run destructive fixtures against the production schema.
+
+## Verification in this checkout
+
+The September 11 workstation pass completed 157 tests, with 41 PostgreSQL tests
+skipped because disposable database targets were not configured. Ruff and strict
+mypy passed. The Windows output device passed play/pause/seek/stop checks. Two
+repository MP3 recordings (`088.mp3` and `tramontana.mp3`) were also opened through
+real application import/edit sessions backed by the contract store, rendered as
+waveform and spectrogram, offset and zoomed together, and captured in
+`.artifacts/workstation/representative-mp3.png`. The synthetic annotation workflow
+is captured in `.artifacts/workstation/two-tracks.png`.
+
+Configured PostgreSQL application startup was attempted but refused to start
+because its owned tunnel endpoint `127.0.0.1:5433` was already occupied. The
+existing listener was left untouched. These GUI checks do not establish live
+PostgreSQL save/reopen behavior.
+
+Follow-up coverage includes semantic library/category/definition lane allocation,
+independent track resizing and overflow scrolling, microphone format conversion and
+import/reopen, and real-process tunnel cleanup after normal exit and parent crashes.
+The occupied-port issue was traced to orphaned SSH processes; the guardian now
+prevents those leftovers after application termination.

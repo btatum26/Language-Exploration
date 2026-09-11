@@ -10,7 +10,7 @@ from PySide6 import QtWidgets
 
 from application import WorkbenchApplication, WorkbenchError, WorkbenchSettings
 from gui.controller import ApplicationClient
-from gui.main_window import MainWindow
+from gui.workstation_window import WorkstationWindow
 
 
 class Window(Protocol):
@@ -32,7 +32,7 @@ def run_started_gui(
     qt_application: QtWidgets.QApplication,
     application: ApplicationLifecycle,
     *,
-    window_factory: Callable[[ApplicationClient], Window] = MainWindow,
+    window_factory: Callable[[ApplicationClient], Window] = WorkstationWindow,
     event_loop: Callable[[], int] | None = None,
 ) -> int:
     """Start infrastructure, inject the API into one window, and always shut down."""

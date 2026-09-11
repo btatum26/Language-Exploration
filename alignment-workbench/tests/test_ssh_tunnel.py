@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import io
 import subprocess
-from dataclasses import dataclass
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,6 +17,7 @@ from application.ssh_tunnel import SshTunnel, SshTunnelConfig
 
 @dataclass
 class FakeProcess:
+    stdin: io.StringIO = field(default_factory=io.StringIO)
     return_code: int | None = None
     terminate_calls: int = 0
     kill_calls: int = 0
@@ -64,7 +69,8 @@ def test_tunnel_starts_hidden_waits_for_readiness_and_stops(
     tunnel = SshTunnel(config())
     assert tunnel.start() is tunnel
     assert tunnel.running
-    assert popen_call["command"] == [
+    assert popen_call["command"][1].endswith("tunnel_guardian.py")
+    assert popen_call["command"][2:] == [
         "ssh",
         "-o",
         "BatchMode=yes",
@@ -78,9 +84,51 @@ def test_tunnel_starts_hidden_waits_for_readiness_and_stops(
 
     tunnel.stop()
     tunnel.stop()
-    assert process.terminate_calls == 1
+    assert process.stdin.closed
     assert process.wait_calls == 1
     assert not tunnel.running
+
+
+@pytest.mark.parametrize("crash", [False, True])
+def test_guardian_releases_child_port_when_parent_exits(tmp_path: Path, crash: bool) -> None:
+    """Real process/pipe test: no SSH, network service or database is required."""
+    port_file = tmp_path / "port.txt"
+    child_code = (
+        "import socket,time; from pathlib import Path; "
+        "s=socket.socket(); s.bind(('127.0.0.1',0)); s.listen(); "
+        f"Path({str(port_file)!r}).write_text(str(s.getsockname()[1])); time.sleep(60)"
+    )
+    guardian = Path(tunnel_module.__file__).with_name("tunnel_guardian.py")
+    command = [sys.executable, str(guardian), sys.executable, "-c", child_code]
+    parent_code = (
+        "import subprocess,sys; "
+        f"p=subprocess.Popen({command!r},stdin=subprocess.PIPE); "
+        "sys.stdin.buffer.read(); p.stdin.close(); p.wait(timeout=5)"
+    )
+    parent = subprocess.Popen([sys.executable, "-c", parent_code], stdin=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 10
+        while not port_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert port_file.exists(), "supervised child did not start"
+        port = int(port_file.read_text())
+        assert tunnel_module.port_is_open("127.0.0.1", port)
+        if crash:
+            parent.kill()
+        else:
+            assert parent.stdin is not None
+            parent.stdin.close()
+        parent.wait(timeout=5)
+        deadline = time.monotonic() + 5
+        while tunnel_module.port_is_open("127.0.0.1", port) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not tunnel_module.port_is_open("127.0.0.1", port)
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+        parent.wait(timeout=5)
+        if parent.stdin is not None:
+            parent.stdin.close()
 
 
 def test_tunnel_reports_a_missing_ssh_executable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,6 +179,6 @@ def test_tunnel_timeout_terminates_the_ssh_process(
     with pytest.raises(WorkbenchStartupError, match="within 0.5 seconds"):
         tunnel.start()
 
-    assert process.terminate_calls == 1
+    assert process.stdin.closed
     assert process.wait_calls == 1
     assert not tunnel.running

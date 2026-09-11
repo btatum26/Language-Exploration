@@ -10,6 +10,7 @@ from uuid import UUID
 import soundfile as sf  # type: ignore[import-untyped]
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from gui.annotation_lanes import annotation_lanes
 from gui.spectrogram import SpectrogramPreview
 from models import ConceptRef, LibraryEntry, SignalAnnotation
 
@@ -214,6 +215,7 @@ class WaveformView(QtWidgets.QWidget):
         self._message = "Open a recording to prepare its waveform"
         self._annotation_rects: dict[UUID, QtCore.QRectF] = {}
         self.viewport = (0, 1)
+        self.workspace_offset: float | None = None
         self.selection: tuple[int, int] | None = None
         self._editable = True
         self._press: QtCore.QPointF | None = None
@@ -306,7 +308,7 @@ class WaveformView(QtWidgets.QWidget):
         self.update()
 
     def set_playhead_seconds(self, seconds: float) -> None:
-        self._playhead_seconds = max(0.0, seconds)
+        self._playhead_seconds = seconds if self.workspace_offset is not None else max(0.0, seconds)
         self.update()
 
     def sample_to_x(self, sample: float) -> float:
@@ -319,6 +321,11 @@ class WaveformView(QtWidgets.QWidget):
         return max(0, min(self._frame_count, sample))
 
     def set_viewport(self, start: int, end: int) -> None:
+        if self.workspace_offset is not None:
+            self.viewport = (start, max(start + 1, end))
+            self.update()
+            self.viewport_changed.emit(*self.viewport)
+            return
         span = max(1, min(self._frame_count, end - start))
         start = max(0, min(self._frame_count - span, start))
         self.viewport = (start, start + span)
@@ -328,7 +335,14 @@ class WaveformView(QtWidgets.QWidget):
         self.viewport_changed.emit(*self.viewport)
 
     def fit_recording(self) -> None:
+        if self.workspace_offset is not None:
+            self.update()
+            self.viewport_changed.emit(*self.viewport)
+            return
         self.set_viewport(0, self._frame_count)
+
+    def annotation_rows(self) -> tuple[dict[UUID, int], int]:
+        return annotation_lanes(self._annotations, self.definitions)
 
     def zoom_to_selection(self) -> None:
         if self.selection:
@@ -354,7 +368,8 @@ class WaveformView(QtWidgets.QWidget):
         bounds = QtCore.QRectF(self.rect()).adjusted(10, 10, -10, -25)
         painter.save()
         painter.setClipRect(bounds)
-        lane = QtCore.QRectF(bounds.left(), bounds.top(), bounds.width(), 36)
+        rows, row_count = self.annotation_rows()
+        lane = QtCore.QRectF(bounds.left(), bounds.top(), bounds.width(), 36 * row_count)
         painter.fillRect(lane, QtGui.QColor("#202731"))
         self._annotation_rects.clear()
         for annotation in self._annotations:
@@ -367,7 +382,9 @@ class WaveformView(QtWidgets.QWidget):
             if end is None:
                 x -= 4
             right = self.sample_to_x(end) if end is not None else x + 8
-            rect = QtCore.QRectF(x, lane.top() + 3, max(3, right - x), lane.height() - 6)
+            rect = QtCore.QRectF(
+                x, lane.top() + 3 + rows[annotation.id] * 36, max(3, right - x), 30
+            )
             self._annotation_rects[annotation.id] = rect.intersected(lane)
             painter.fillRect(rect, QtGui.QColor("#337ba0" if selected else "#345548"))
             painter.setPen(QtGui.QPen(QtGui.QColor("white" if selected else "#68aa92"), 2))
@@ -380,15 +397,30 @@ class WaveformView(QtWidgets.QWidget):
                 )
         handle = self._boundary or self._hovered_edge
         if handle is not None:
-            _, start, end, edge = handle
+            annotation_id, start, end, edge = handle
             if self._boundary and self._preview:
                 start, end = self._preview
             x = self.sample_to_x(start if edge == "start" else end)
             painter.setPen(QtGui.QPen(QtGui.QColor("#ffffff"), 4))
-            painter.drawLine(
-                QtCore.QPointF(x, lane.top() + 3), QtCore.QPointF(x, lane.bottom() - 3)
+            top = lane.top() + rows.get(annotation_id, 0) * 36
+            painter.drawLine(QtCore.QPointF(x, top + 3), QtCore.QPointF(x, top + 33))
+        wave_bounds = bounds.adjusted(0, 36 * row_count + 8, 0, 0)
+        if self.workspace_offset is not None:
+            painter.setPen(QtGui.QPen(QtGui.QColor("#657383"), 1))
+            painter.drawRect(
+                QtCore.QRectF(
+                    self.sample_to_x(0),
+                    wave_bounds.top(),
+                    self.sample_to_x(self._frame_count) - self.sample_to_x(0),
+                    wave_bounds.height(),
+                )
             )
-        wave_bounds = bounds.adjusted(0, 44, 0, 0)
+        for index in range(6):
+            x = 10 + (self.width() - 20) * index / 5
+            painter.setPen(QtGui.QColor("#29333f"))
+            painter.drawLine(
+                QtCore.QPointF(x, wave_bounds.top()), QtCore.QPointF(x, wave_bounds.bottom())
+            )
         if self.show_spectrogram and self._envelope is not None:
             self._paint_spectrogram(painter, wave_bounds)
         else:
@@ -411,7 +443,7 @@ class WaveformView(QtWidgets.QWidget):
             painter.drawText(
                 QtCore.QRectF(max(0, min(self.width() - 70, x - 35)), bounds.bottom() + 3, 70, 20),
                 QtCore.Qt.AlignmentFlag.AlignCenter,
-                f"{sample / self._sample_rate_hz:.3f}s",
+                f"{sample / self._sample_rate_hz + (self.workspace_offset or 0):.3f}s",
             )
 
     def _paint_spectrogram(self, painter: QtGui.QPainter, bounds: QtCore.QRectF) -> None:
@@ -445,7 +477,10 @@ class WaveformView(QtWidgets.QWidget):
             painter.setPen(QtGui.QColor("#aeb7c2"))
             painter.drawText(bounds, QtCore.Qt.AlignmentFlag.AlignCenter, self._message)
             return
-        if self._detail and (self._detail.start_sample, self._detail.end_sample) == self.viewport:
+        if self._detail and (self._detail.start_sample, self._detail.end_sample) == (
+            max(0, self.viewport[0]),
+            min(self._frame_count, self.viewport[1]),
+        ):
             envelope = self._detail
         end = envelope.end_sample or envelope.frame_count
         count = len(envelope.minimum)
@@ -469,11 +504,16 @@ class WaveformView(QtWidgets.QWidget):
             position is None
             or not self.audio_ready
             or not self._editable
-            or not QtCore.QRectF(0, 10, self.width(), 36).contains(position)
+            or not QtCore.QRectF(0, 10, self.width(), 36 * self.annotation_rows()[1]).contains(
+                position
+            )
         ):
             return None
         candidates: list[tuple[float, bool, int, str, str, UUID, int, int]] = []
+        rows, _ = self.annotation_rows()
         for annotation in self._annotations:
+            if not 13 + rows[annotation.id] * 36 <= position.y() <= 43 + rows[annotation.id] * 36:
+                continue
             geometry = annotation.geometry
             if geometry.type != "time_interval" or geometry.end_sample is None:
                 continue
@@ -533,7 +573,7 @@ class WaveformView(QtWidgets.QWidget):
         elif event.button() != QtCore.Qt.MouseButton.LeftButton:
             self._press = None
             return
-        elif event.position().y() <= 46:
+        elif event.position().y() <= 10 + 36 * self.annotation_rows()[1]:
             boundary = self._edge_at(event.position())
             if boundary is not None:
                 self._gesture = "boundary"
@@ -545,6 +585,7 @@ class WaveformView(QtWidgets.QWidget):
             # Input can arrive before the next repaint after undo/redo. Hit-test
             # authoritative samples, never rectangles left over from a paint.
             self._annotation_rects = {}
+            rows, row_count = self.annotation_rows()
             for annotation in self._annotations:
                 left = self.sample_to_x(annotation.geometry.start_sample)
                 end = annotation.geometry.end_sample
@@ -553,10 +594,10 @@ class WaveformView(QtWidgets.QWidget):
                 right = self.sample_to_x(end) if end is not None else left + 8
                 self._annotation_rects[annotation.id] = QtCore.QRectF(
                     left,
-                    13,
+                    13 + rows[annotation.id] * 36,
                     max(3, right - left),
                     30,
-                ).intersected(QtCore.QRectF(10, 10, self.width() - 20, 36))
+                ).intersected(QtCore.QRectF(10, 10, self.width() - 20, 36 * row_count))
             candidates = [
                 (rect.width(), str(key), key)
                 for key, rect in self._annotation_rects.items()
@@ -614,6 +655,11 @@ class WaveformView(QtWidgets.QWidget):
                 self.boundary_committed.emit(annotation_id, *preview)
         elif self._gesture == "select" and not self._dragged:
             sample = self.x_to_sample(event.position().x())
+            if self.workspace_offset is not None:
+                start, end = self.viewport
+                sample = round(
+                    start + (event.position().x() - 10) * (end - start) / max(1, self.width() - 20)
+                )
             self.set_playhead_seconds(sample / self._sample_rate_hz)
             self.seek_requested.emit(sample)
         self._press = None

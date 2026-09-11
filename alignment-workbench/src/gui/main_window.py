@@ -47,6 +47,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._waveform_generation = 0
         self._waveform_recording_id: UUID | None = None
         self._shutdown = False
+        self._exit_requested = False
         self._detail_pending = False
         self._spectrogram_pending = False
         self._detail_timer = QtCore.QTimer(self)
@@ -81,6 +82,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_action = QtGui.QAction("Save Revision", self)
         self.save_action.setObjectName("save_action")
         self.save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
+        self.retry_saves_action = QtGui.QAction("Retry Pending Saves", self)
+        self.retry_saves_action.triggered.connect(self.controller.retry_recovery)
+        self.controller.save_finished.connect(self._exit_save_finished)
+        self.controller.recovery_finished.connect(self._exit_recovery_finished)
         self.undo_action = QtGui.QAction("Undo", self)
         self.undo_action.setShortcut(QtGui.QKeySequence.StandardKey.Undo)
         self.redo_action = QtGui.QAction("Redo", self)
@@ -95,6 +100,7 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addAction(self.close_action)
         toolbar.addSeparator()
         toolbar.addAction(self.save_action)
+        toolbar.addAction(self.retry_saves_action)
         toolbar.addAction(self.undo_action)
         toolbar.addAction(self.redo_action)
 
@@ -153,15 +159,32 @@ class MainWindow(QtWidgets.QMainWindow):
         panel = QtWidgets.QWidget(self)
         layout = QtWidgets.QVBoxLayout(panel)
 
-        self.error_banner = QtWidgets.QLabel(panel)
+        self.error_panel = QtWidgets.QWidget(panel)
+        self.error_panel.setObjectName("error_panel")
+        self.error_panel.setStyleSheet(
+            "QWidget#error_panel { background: #5b2027; border-radius: 3px; }"
+        )
+        error_layout = QtWidgets.QHBoxLayout(self.error_panel)
+        error_layout.setContentsMargins(7, 7, 7, 7)
+        self.error_banner = QtWidgets.QLabel(self.error_panel)
         self.error_banner.setObjectName("error_banner")
         self.error_banner.setWordWrap(True)
         self.error_banner.setMaximumHeight(90)
         self.error_banner.setStyleSheet(
             "QLabel { background: #5b2027; color: #ffffff; padding: 7px; border-radius: 3px; }"
         )
-        self.error_banner.hide()
-        layout.addWidget(self.error_banner)
+        error_layout.addWidget(self.error_banner, 1)
+        self.error_retry_button = QtWidgets.QToolButton(self.error_panel)
+        self.error_retry_button.setObjectName("error_retry_button")
+        self.error_retry_button.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.error_retry_button.setDefaultAction(self.retry_saves_action)
+        self.error_retry_button.hide()
+        error_layout.addWidget(self.error_retry_button)
+        self.error_panel.hide()
+        layout.addWidget(self.error_panel)
+        self.controller.recovery_error.connect(
+            lambda message: self._show_error(message, retry=True)
+        )
 
         metadata_group = QtWidgets.QGroupBox("Active recording", panel)
         metadata = QtWidgets.QGridLayout(metadata_group)
@@ -714,16 +737,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_actions()
         if busy:
             self.statusBar().showMessage("Working…")
+        elif self._exit_requested:
+            QtCore.QTimer.singleShot(0, self.close)
 
     @QtCore.Slot(str)
-    def _show_error(self, message: str) -> None:
+    def _show_error(self, message: str, *, retry: bool = False) -> None:
         self.error_banner.setText(message)
-        self.error_banner.show()
+        self.error_retry_button.setVisible(retry)
+        self.error_panel.show()
         self.statusBar().showMessage(message, 10_000)
 
     @QtCore.Slot(str)
     def _show_notice(self, message: str) -> None:
-        self.error_banner.hide()
+        self.error_panel.hide()
         self.statusBar().showMessage(message, 5_000)
 
     def _update_actions(self) -> None:
@@ -733,6 +759,7 @@ class MainWindow(QtWidgets.QMainWindow):
         library = self._selected_library()
         editable = has_session and not self._busy
         self.import_action.setEnabled(not self._busy)
+        self.retry_saves_action.setEnabled(not self._busy)
         self.open_action.setEnabled(recording_selected and not self._busy)
         self.open_button.setEnabled(recording_selected and not self._busy)
         self.close_action.setEnabled(has_session and not self._busy)
@@ -1267,15 +1294,63 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stop_button.setEnabled(not player.source().isEmpty())
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        if self._shutdown:
+            event.accept()
+            return
         if self._busy:
-            self._show_error("Wait for the current operation to finish before exiting")
+            self._exit_requested = True
+            self.statusBar().showMessage(
+                "Waiting for the current operation before saving and exiting…"
+            )
             event.ignore()
             return
-        if not self._prepare_to_replace_session():
+        session = self.controller.session
+        if session is not None and session.sync_state is SyncState.CONFLICT:
+            self._exit_requested = False
+            self._show_error(
+                "Resolve the save conflict before exiting. Recovery files are preserved."
+            )
+            event.ignore()
+            return
+        if session is not None and session.dirty:
+            event.ignore()
+            self._exit_requested = False
+            self.save_dialog.setWindowTitle("Save before exiting")
+            accepted = self.save_dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted
+            self.save_dialog.setWindowTitle("Save revision")
+            if accepted:
+                self._exit_requested = True
+                self.controller.save(
+                    author=self.author_edit.text().strip() or None,
+                    message=self.save_message_edit.text().strip() or None,
+                )
+            return
+        if session is not None and session.sync_state is SyncState.PENDING:
+            event.ignore()
+            self._exit_requested = True
+            self.controller.retry_recovery()
+            return
+        if not self.controller.close_session():
+            self._exit_requested = False
             event.ignore()
             return
         self.shutdown()
         event.accept()
+
+    def _exit_save_finished(self, saved: bool) -> None:
+        if self._exit_requested and not saved:
+            self._exit_requested = False
+            session = self.controller.session
+            if session is not None and session.sync_state is SyncState.PENDING:
+                self._show_error(
+                    "Changes are saved locally, but the database save did not complete. "
+                    "Use Retry Pending Saves, then close again.",
+                    retry=True,
+                )
+
+    def _exit_recovery_finished(self, recovered: bool) -> None:
+        if not recovered:
+            self._exit_requested = False
 
     def shutdown(self) -> None:
         if self._shutdown:

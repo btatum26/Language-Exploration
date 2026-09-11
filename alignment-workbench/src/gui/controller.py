@@ -15,8 +15,12 @@ from PySide6 import QtCore
 from application import (
     AnnotationLibraryListItem,
     CreateRecordingCommand,
+    PendingRecoveryOperationError,
+    PendingSave,
     Queued,
     RecordingListItem,
+    RecoveryConflict,
+    RecoveryResult,
     ResolvedAudio,
     SaveConflict,
     Saved,
@@ -125,6 +129,9 @@ class LibraryClient(Protocol):
 
 class ApplicationClient(Protocol):
     @property
+    def recovery(self) -> RecoveryClient: ...
+
+    @property
     def libraries(self) -> LibraryClient: ...
 
     def ensure_core_library(self) -> LibraryVersion: ...
@@ -141,6 +148,14 @@ class ApplicationClient(Protocol):
     def import_recording(self, command: CreateRecordingCommand) -> EditableRecording: ...
 
     def open_recording(self, recording_id: UUID) -> EditableRecording: ...
+
+
+class RecoveryClient(Protocol):
+    def retry_all(self) -> tuple[RecoveryResult, ...]: ...
+
+    def list_pending(self) -> tuple[PendingSave, ...]: ...
+
+    def list_conflicts(self) -> tuple[RecoveryConflict, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,7 +195,10 @@ class WorkbenchController(QtCore.QObject):
     session_changed = QtCore.Signal(object)
     busy_changed = QtCore.Signal(bool)
     error = QtCore.Signal(str)
+    recovery_error = QtCore.Signal(str)
     notice = QtCore.Signal(str)
+    save_finished = QtCore.Signal(bool)
+    recovery_finished = QtCore.Signal(bool)
 
     def __init__(
         self,
@@ -198,6 +216,27 @@ class WorkbenchController(QtCore.QObject):
         self._namespaces_by_version_id: Mapping[UUID, str] = MappingProxyType({})
         self._busy_count = 0
         self._generation = 0
+        self._picker_versions: dict[str, LibraryVersion] = {}
+
+    def load_picker_libraries(self) -> None:
+        """Discover published definitions without pinning anything to the recording."""
+
+        def operation() -> dict[str, LibraryVersion]:
+            return {
+                item.namespace: self._api.libraries.get_version(item.latest_version_id)
+                for item in self._libraries
+                if item.latest_version_id is not None
+            }
+
+        def success(versions: dict[str, LibraryVersion]) -> None:
+            self._picker_versions = versions
+            self.session_changed.emit(self._session)
+
+        self._run(
+            operation,
+            success,
+            lambda exc: self.error.emit(f"Could not load definitions: {_error_message(exc)}"),
+        )
 
     @property
     def recordings(self) -> tuple[RecordingListItem, ...]:
@@ -237,6 +276,18 @@ class WorkbenchController(QtCore.QObject):
                     entry=entry,
                 )
             )
+        pinned_namespaces = {
+            self._namespaces_by_version_id.get(version.id) for version in session.pinned_libraries
+        }
+        for namespace, version in self._picker_versions.items():
+            if namespace in pinned_namespaces:
+                continue
+            for entry in version.entries:
+                choices.append(
+                    ConceptChoice(
+                        ConceptRef(f"{namespace}@{version.version_label}:{entry.entry_key}"), entry
+                    )
+                )
         return tuple(choices)
 
     def refresh_all(self) -> None:
@@ -284,10 +335,18 @@ class WorkbenchController(QtCore.QObject):
                 session.close(discard_unsaved_changes=True)
                 raise
 
+        def failure(exc: BaseException) -> None:
+            signal = (
+                self.recovery_error
+                if isinstance(exc, PendingRecoveryOperationError)
+                else self.error
+            )
+            signal.emit(f"Could not open recording: {_error_message(exc)}")
+
         self._run(
             operation,
             lambda opened: self._install_if_current(opened, generation),
-            lambda exc: self.error.emit(f"Could not open recording: {_error_message(exc)}"),
+            failure,
         )
 
     def import_recording(self, source: Path, *, name: str, language: str) -> None:
@@ -460,6 +519,8 @@ class WorkbenchController(QtCore.QObject):
                 min_frequency_hz=min_frequency_hz,
                 max_frequency_hz=max_frequency_hz,
             )
+            # Explicit creation is the point at which the selected publication is pinned.
+            self._pin_concept_publication(session, concept_ref)
             annotation = session.create_annotation(
                 concept_ref=concept_ref,
                 geometry=geometry,
@@ -469,6 +530,18 @@ class WorkbenchController(QtCore.QObject):
             self.annotation_created.emit(annotation.id)
 
         self._mutate(operation)
+
+    def _pin_concept_publication(self, session: EditableRecording, concept: ConceptRef) -> None:
+        namespace = str(concept).split("@", 1)[0]
+        version = self._picker_versions.get(namespace)
+        if version is not None and not any(
+            self._namespaces_by_version_id.get(pin.id) == namespace
+            for pin in session.pinned_libraries
+        ):
+            session.pin_library_version(version)
+            namespaces = dict(self._namespaces_by_version_id)
+            namespaces[version.id] = namespace
+            self._namespaces_by_version_id = MappingProxyType(namespaces)
 
     def update_annotation(
         self,
@@ -507,6 +580,7 @@ class WorkbenchController(QtCore.QObject):
                 note=note,
                 provenance_ref=current.provenance_ref,
             )
+            self._pin_concept_publication(session, concept_ref)
             session.replace_annotation(annotation_id, replacement)
 
         self._mutate(operation)
@@ -555,12 +629,68 @@ class WorkbenchController(QtCore.QObject):
                 self.error.emit("Save conflicted with a newer database revision")
             self.session_changed.emit(session)
             self.refresh_recordings()
+            self.save_finished.emit(isinstance(result, Saved))
+
+        def failure(exc: BaseException) -> None:
+            self.error.emit(f"Could not save recording: {_error_message(exc)}")
+            self.save_finished.emit(False)
 
         self._run(
             lambda: session.save(author=author, message=message),
             success,
-            lambda exc: self.error.emit(f"Could not save recording: {_error_message(exc)}"),
+            failure,
         )
+
+    def retry_recovery(self) -> None:
+        if self.busy:
+            return
+        session = self._session
+        if session is not None and session.dirty:
+            self.error.emit("Save your current changes before retrying pending saves")
+            self.recovery_finished.emit(False)
+            return
+
+        def operation() -> _OpenedRecording | None:
+            self._api.recovery.retry_all()
+            conflicts = self._api.recovery.list_conflicts()
+            pending = self._api.recovery.list_pending()
+            if conflicts:
+                raise WorkbenchError(
+                    "Saved changes conflict with a newer database revision. "
+                    "Recovery files are preserved; resolve the conflict before continuing."
+                )
+            if pending:
+                raise WorkbenchError(
+                    "Changes are still saved locally only. Check the database connection "
+                    "and use Retry Pending Saves again."
+                )
+            if session is None:
+                return None
+            opened = self._api.open_recording(session.recording_id)
+            try:
+                item = next(
+                    item
+                    for item in self._api.list_recordings(limit=500)
+                    if item.recording_id == session.recording_id
+                )
+                return _OpenedRecording(opened, item, self._resolve_namespaces(opened))
+            except BaseException:
+                opened.close()
+                raise
+
+        def success(opened: _OpenedRecording | None) -> None:
+            if opened is not None:
+                self.close_session()
+                self._install(opened)
+            self.refresh_recordings()
+            self.notice.emit("Pending saves synchronized with the database")
+            self.recovery_finished.emit(True)
+
+        def failure(exc: BaseException) -> None:
+            self.recovery_error.emit(f"Could not recover pending saves: {_error_message(exc)}")
+            self.recovery_finished.emit(False)
+
+        self._run(operation, success, failure)
 
     def shutdown(self) -> None:
         self._next_generation()
