@@ -363,12 +363,34 @@ class RevisionMetadata(DomainModel):
         return self
 
 
+class RecordingMetadata(DomainModel):
+    """Optional discovery labels; never evidence of interval-level annotated sounds.
+
+    Canonical casefolded values are reusable identities across imports and revisions.
+    Language varieties use a separate list aligned by language (language: variety).
+    """
+
+    legacy_labels: bool = True
+    languages: tuple[str, ...] = ()
+    varieties: tuple[str, ...] = ()
+    speakers: tuple[str, ...] = ()
+    collections: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
+
+    @field_validator("languages", "varieties", "speakers", "collections", "tags")
+    @classmethod
+    def canonical_choices(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(sorted({" ".join(value.split()).casefold() for value in values
+                             if value.strip()}))
+
+
 class AnnotatedRecordingSnapshot(DomainModel):
     schema_version: Literal["1.0"] = "1.0"
     recording_id: UUID
     revision: RevisionMetadata
     name: NonEmptyStr
     default_speaker_ref: UUID | None = None
+    metadata: RecordingMetadata = Field(default_factory=RecordingMetadata)
     language: NonEmptyStr
     audio_asset: AudioAsset
     libraries: tuple[PinnedLibraryVersion, ...]
@@ -419,6 +441,7 @@ class CreateRecordingRequest(DomainModel):
     audio_asset: AudioAsset
     name: NonEmptyStr
     default_speaker_ref: UUID | None = None
+    metadata: RecordingMetadata = Field(default_factory=RecordingMetadata)
     language: NonEmptyStr
     author: str | None = None
     message: str | None = None
@@ -439,6 +462,7 @@ class SaveRecordingSnapshotRequest(DomainModel):
     expected_parent_revision_id: UUID | None
     name: NonEmptyStr
     default_speaker_ref: UUID | None = None
+    metadata: RecordingMetadata = Field(default_factory=RecordingMetadata)
     language: NonEmptyStr
     author: str | None = None
     message: str | None = None

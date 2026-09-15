@@ -37,6 +37,7 @@ from models import (
     LibraryVersion,
     PinnedLibraryVersion,
     PointGeometry,
+    RecordingMetadata,
     SignalAnnotation,
     TimeFrequencyBoxGeometry,
     TimeFrequencyPolygonGeometry,
@@ -85,6 +86,11 @@ class EditableRecording(Protocol):
 
     @property
     def closed(self) -> bool: ...
+
+    @property
+    def metadata(self) -> RecordingMetadata: ...
+
+    def set_metadata(self, metadata: RecordingMetadata) -> None: ...
 
     def close(self, *, discard_unsaved_changes: bool = False) -> None: ...
 
@@ -199,6 +205,7 @@ class WorkbenchController(QtCore.QObject):
     notice = QtCore.Signal(str)
     save_finished = QtCore.Signal(bool)
     recovery_finished = QtCore.Signal(bool)
+    import_finished = QtCore.Signal(bool)
 
     def __init__(
         self,
@@ -294,6 +301,21 @@ class WorkbenchController(QtCore.QObject):
         self.refresh_recordings()
         self.refresh_libraries()
 
+    @property
+    def api(self) -> ApplicationClient:
+        return self._api
+
+    def _all_recordings(self) -> tuple[RecordingListItem, ...]:
+        items: dict[UUID, RecordingListItem] = {}
+        offset = 0
+        while True:
+            page = self._api.list_recordings(limit=500, offset=offset)
+            previous_count = len(items)
+            items.update((item.recording_id, item) for item in page)
+            if len(page) < 500 or len(items) == previous_count:
+                return tuple(items.values())
+            offset += len(page)
+
     def refresh_recordings(self) -> None:
         self.recordings_loading.emit()
 
@@ -302,7 +324,7 @@ class WorkbenchController(QtCore.QObject):
             self.recordings_changed.emit(items)
 
         self._run(
-            lambda: self._api.list_recordings(limit=500),
+            self._all_recordings,
             success,
             lambda exc: self.recordings_failed.emit(_error_message(exc)),
         )
@@ -349,9 +371,11 @@ class WorkbenchController(QtCore.QObject):
             failure,
         )
 
-    def import_recording(self, source: Path, *, name: str, language: str) -> None:
+    def import_recording(self, source: Path, *, name: str, language: str,
+                         metadata: RecordingMetadata | None = None) -> None:
         if self._session is not None:
             self.error.emit("Close the active recording before importing another one")
+            self.import_finished.emit(False)
             return
         generation = self._next_generation()
 
@@ -362,7 +386,8 @@ class WorkbenchController(QtCore.QObject):
                     recording_id=uuid4(),
                     source_audio_path=source,
                     name=name,
-                    language=language,
+                    language=language or "und",
+                    metadata=metadata or RecordingMetadata(),
                     libraries=(
                         PinnedLibraryVersion(
                             namespace="core",
@@ -373,7 +398,7 @@ class WorkbenchController(QtCore.QObject):
                 )
             )
             try:
-                recordings = self._api.list_recordings(limit=500)
+                recordings = self._all_recordings()
                 item = next(
                     candidate
                     for candidate in recordings
@@ -393,11 +418,16 @@ class WorkbenchController(QtCore.QObject):
             self.recordings_changed.emit(imported.recordings)
             self._install(imported.opened)
             self.notice.emit(f"Imported {imported.opened.session.name}")
+            self.import_finished.emit(True)
+
+        def failure(exc: BaseException) -> None:
+            self.error.emit(f"Could not import recording: {_error_message(exc)}")
+            self.import_finished.emit(False)
 
         self._run(
             operation,
             success,
-            lambda exc: self.error.emit(f"Could not import recording: {_error_message(exc)}"),
+            failure,
         )
 
     def close_session(self, *, discard_unsaved_changes: bool = False) -> bool:

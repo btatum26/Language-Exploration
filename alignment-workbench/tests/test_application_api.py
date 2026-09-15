@@ -222,6 +222,7 @@ class MemoryPersistenceStore:
                 audio_asset=snapshot.audio_asset,
                 revision_number=snapshot.revision.number,
                 revised_at=snapshot.revision.created_at,
+                metadata=snapshot.metadata, language=snapshot.language,
             )
             for snapshot in summaries[offset : offset + limit]
         )
@@ -285,6 +286,7 @@ class MemoryPersistenceStore:
             name=request.name,
             default_speaker_ref=request.default_speaker_ref,
             language=request.language,
+            metadata=request.metadata,
             audio_asset=request.audio_asset,
             libraries=request.libraries,
             annotations=request.annotations,
@@ -322,6 +324,7 @@ class MemoryPersistenceStore:
             name=request.name,
             default_speaker_ref=request.default_speaker_ref,
             language=request.language,
+            metadata=request.metadata,
             audio_asset=parent.audio_asset,
             libraries=request.libraries,
             annotations=request.annotations,

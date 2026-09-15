@@ -60,6 +60,7 @@ def exercise_first_use(qtbot, api, tmp_path, monkeypatch, *, size=(1024, 768), s
     )
     answers = iter((("Manual first use", True), ("en", True)))
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *a, **kw: next(answers))
+    monkeypatch.setattr(QtWidgets.QDialog, "exec", lambda self: QtWidgets.QDialog.DialogCode.Accepted)
     window.import_action.trigger()
     qtbot.waitUntil(lambda: window.waveform._envelope is not None)
     if spectrogram:

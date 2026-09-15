@@ -8,11 +8,15 @@ from pathlib import Path
 import numpy as np
 from PySide6 import QtCore, QtMultimedia, QtWidgets
 
+from application import RecordingListItem
+from gui.metadata_editor import MetadataEditor
+
 
 class MicrophoneDialog(QtWidgets.QDialog):
     add_requested = QtCore.Signal()
 
-    def __init__(self, path: Path, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, path: Path, parent: QtWidgets.QWidget | None = None, *,
+                 recordings: tuple[RecordingListItem, ...] = ()) -> None:
         super().__init__(parent)
         self.path = path
         self.source: QtMultimedia.QAudioSource | None = None
@@ -41,15 +45,20 @@ class MicrophoneDialog(QtWidgets.QDialog):
         self.level.setRange(0, 100)
         self.level.setValue(0)
         self.level.setFormat("Input level: %p%")
+        self.save_progress = QtWidgets.QProgressBar()
+        self.save_progress.setRange(0, 0)
+        self.save_progress.hide()
         self.start_button = QtWidgets.QPushButton("Start recording")
         self.stop_button = QtWidgets.QPushButton("Stop")
         self.add_button = QtWidgets.QPushButton("Add recording")
         self.cancel_button = QtWidgets.QPushButton("Cancel")
         layout.addRow("Microphone", self.device)
         layout.addRow("Name", self.name)
-        layout.addRow("Language tag", self.language)
+        self.metadata_editor = MetadataEditor(recordings)
+        layout.addRow(self.metadata_editor)
         layout.addRow(self.status)
         layout.addRow(self.level)
+        layout.addRow(self.save_progress)
         for button in (self.start_button, self.stop_button, self.add_button, self.cancel_button):
             button.setAutoDefault(False)
             layout.addRow(button)
@@ -73,6 +82,7 @@ class MicrophoneDialog(QtWidgets.QDialog):
         self.cancel_button.setEnabled(not self._saving)
         self.name.setEnabled(not self._saving)
         self.language.setEnabled(not self._saving)
+        self.metadata_editor.setEnabled(not self._saving)
 
     def start(self) -> None:
         if self.source is not None or self._saving or not self.devices:
@@ -170,12 +180,19 @@ class MicrophoneDialog(QtWidgets.QDialog):
 
     def set_saving(self, saving: bool) -> None:
         self._saving = saving
+        self.save_progress.setVisible(saving)
+        self.add_button.setText("Saving recording…" if saving else "Add recording")
+        if saving:
+            self.status.setText("Saving recording to the database. Please wait…")
         self._update()
 
     def _add(self) -> None:
-        if not self.name.text().strip() or not self.language.text().strip():
-            self.status.setText("Enter a recording name and language tag.")
+        if self._saving or self.source is not None or not self.frames or self._failed:
             return
+        if not self.name.text().strip():
+            self.status.setText("Enter a recording name.")
+            return
+        self.set_saving(True)
         self.add_requested.emit()
 
     def reject(self) -> None:

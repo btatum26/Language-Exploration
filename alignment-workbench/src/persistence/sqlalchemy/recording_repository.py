@@ -25,6 +25,7 @@ from models import (
     AnnotatedRecordingSnapshot,
     CreateRecordingRequest,
     PinnedLibraryVersion,
+    RecordingMetadata,
     RevisionMetadata,
     SaveRecordingSnapshotRequest,
     SignalAnnotation,
@@ -66,7 +67,7 @@ class RecordingRepository:
         if limit < 1 or limit > 1000 or offset < 0:
             raise ValueError("limit must be 1..1000 and offset must be nonnegative")
         head = aliased(RecordingRevisionRow)
-        rows = self._session.execute(
+        result = self._session.execute(
             select(RecordingRow, head, AudioAssetRow, SpeakerRow)
             .join(AudioAssetRow, AudioAssetRow.id == RecordingRow.audio_asset_id)
             .join(head, head.id == RecordingRow.head_revision_id)
@@ -75,6 +76,16 @@ class RecordingRepository:
             .limit(limit)
             .offset(offset)
         )
+        rows = tuple(result)
+        labels: dict[UUID, list[str]] = {}
+        if rows:
+            for revision_id, label in self._session.execute(
+                select(AnnotationRow.recording_revision_id, AnnotationRow.label)
+                .where(AnnotationRow.recording_revision_id.in_([row[1].id for row in rows]),
+                       AnnotationRow.label.is_not(None))
+                .order_by(AnnotationRow.position)
+            ):
+                labels.setdefault(revision_id, []).append(label)
         return tuple(
             RecordingCatalogRecord(
                 recording_id=recording.id,
@@ -84,6 +95,9 @@ class RecordingRepository:
                 audio_asset=audio_asset_from_row(audio),
                 revision_number=revision.revision_number,
                 revised_at=revision.created_at,
+                metadata=RecordingMetadata.model_validate(revision.discovery_metadata),
+                language=revision.language, added_at=recording.created_at,
+                transcript=" ".join(labels.get(revision.id, [])),
             )
             for recording, revision, audio, speaker in rows
         )
@@ -171,6 +185,7 @@ class RecordingRepository:
             name=request.name,
             default_speaker_ref=request.default_speaker_ref,
             language=request.language,
+            metadata=request.metadata,
             audio_asset=audio_asset,
             libraries=request.libraries,
             annotations=request.annotations,
@@ -235,6 +250,7 @@ class RecordingRepository:
             name=request.name,
             default_speaker_ref=request.default_speaker_ref,
             language=request.language,
+            metadata=request.metadata,
             audio_asset=audio_asset_from_row(audio_row),
             libraries=request.libraries,
             annotations=request.annotations,
@@ -293,6 +309,7 @@ class RecordingRepository:
             snapshot.audio_asset == request.audio_asset
             and snapshot.name == request.name
             and snapshot.default_speaker_ref == request.default_speaker_ref
+            and snapshot.metadata == request.metadata
             and snapshot.language == request.language
             and snapshot.revision.author == request.author
             and snapshot.revision.message == request.message
@@ -312,6 +329,7 @@ class RecordingRepository:
         compatible = (
             snapshot.name == request.name
             and snapshot.default_speaker_ref == request.default_speaker_ref
+            and snapshot.metadata == request.metadata
             and snapshot.language == request.language
             and snapshot.revision.author == request.author
             and snapshot.revision.message == request.message
@@ -422,6 +440,7 @@ class RecordingRepository:
                 name=snapshot.name,
                 default_speaker_ref=snapshot.default_speaker_ref,
                 language=snapshot.language,
+                discovery_metadata=snapshot.metadata.model_dump(mode="json"),
                 created_at=revision.created_at,
                 author=revision.author,
                 message=revision.message,

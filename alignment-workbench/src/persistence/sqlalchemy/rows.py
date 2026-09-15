@@ -314,6 +314,9 @@ class RecordingRevisionRow(Base):
         PostgreSQLUUID(as_uuid=True),
         ForeignKey(f"{SCHEMA}.speakers.id", ondelete="RESTRICT"),
     )
+    discovery_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     language: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

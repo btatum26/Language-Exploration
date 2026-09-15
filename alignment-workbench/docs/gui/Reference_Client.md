@@ -29,6 +29,11 @@ or recording/domain API redesign is required by the workstation.
 **+ Add recording** offers **Record new audio**, **Import audio file**, and
 **Browse existing recordings**. Microphone capture offers device selection, a level
 meter, start/stop, and adding the recorded take through the existing import API.
+**Add recording** shows an indeterminate saving indicator and disables repeat
+submissions and cancellation until import finishes. A successful import closes
+the dialog and confirms the database save in the workspace status bar. Failure
+keeps the take and error visible for retry; dismissing it does not block on
+unrelated catalog reads still running in the background.
 Temporary takes are cleaned up after import or cancellation. Import retains
 WAV/MP3 inspection, immutable storage, the core
 publication pin and initial revision save. The recordings dialog offers search,

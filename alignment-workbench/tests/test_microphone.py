@@ -10,7 +10,7 @@ from gui.waveform import load_waveform_envelope
 from gui.workstation_window import WorkstationWindow
 from tests.test_application_api import MemoryPersistenceStore
 from tests.test_core_library import make_api
-from tests.test_gui import ImmediateRunner
+from tests.test_gui import DeferredRunner, ImmediateRunner
 
 
 class Device:
@@ -124,6 +124,53 @@ def test_no_microphone(qtbot, tmp_path, monkeypatch):
     assert "No microphone" in dialog.status.text()
 
 
+@pytest.mark.parametrize("fail", [False, True])
+def test_import_busy_race_and_failure_cancel(qtbot, tmp_path, microphone, fail):
+    sources = microphone()
+    api = make_api(MemoryPersistenceStore(), tmp_path)
+    runner = DeferredRunner()
+    window = WorkstationWindow(api, task_runner=runner)
+    qtbot.addWidget(window, before_close_func=lambda w: w.shutdown())
+    observed = []
+
+    def record():
+        dialog = window.findChild(MicrophoneDialog)
+        dialog.start()
+        sources[-1].feed(np.full(800, 8192, dtype="<i2").tobytes())
+        dialog.stop()
+        dialog.add_button.click()
+        observed.append(dialog._saving)
+        assert not dialog.cancel_button.isEnabled()
+        assert not dialog.add_button.isEnabled()
+        assert "Saving" in dialog.status.text()
+        assert not dialog.save_progress.isHidden()
+        dialog.reject()
+        assert dialog.isVisible()
+        # Import completes while constructor catalog reads are still pending.
+        if fail:
+            _, _, failure = runner.tasks.pop()
+            failure(ValueError("recording metadata is invalid"))
+            assert not dialog._saving
+            assert "metadata is invalid" in dialog.status.text()
+            assert dialog.path.exists()
+            assert dialog.add_button.isEnabled()
+            dialog.reject()
+        else:
+            runner.complete(len(runner.tasks) - 1)
+
+    QtCore.QTimer.singleShot(0, record)
+    window._record()
+    assert observed == [True]
+    if fail:
+        assert window.pending  # Cleanup waits asynchronously for remaining reads.
+    else:
+        assert len(window.tracks) == 1
+        assert "saved to the database" in window.statusBar().currentMessage()
+    while runner.tasks:
+        runner.complete(0)
+    assert not window.pending
+
+
 @pytest.mark.parametrize("asynchronous", [False, True])
 def test_add_take_imports_and_reopens(qtbot, tmp_path, microphone, asynchronous):
     sources = microphone()
@@ -140,6 +187,8 @@ def test_add_take_imports_and_reopens(qtbot, tmp_path, microphone, asynchronous)
         sources[-1].feed(np.full(8000, 8192, dtype="<i2").tobytes())
         dialog.stop()
         dialog.name.setText("Recorded voice")
+        dialog.metadata_editor.fields["speakers"].setText("Luca, Ben")
+        dialog.metadata_editor.fields["languages"].setText("it")
         dialog.add_button.click()
 
     QtCore.QTimer.singleShot(0, record)
@@ -154,6 +203,8 @@ def test_add_take_imports_and_reopens(qtbot, tmp_path, microphone, asynchronous)
     assert not paths[0].exists()
     item = api.list_recordings()[0]
     assert item.display_name == "Recorded voice"
+    assert item.metadata.speakers == ("ben", "luca")
+    assert item.metadata.languages == ("it",)
     assert item.duration_seconds == 1
     window.shutdown()
     reopened = api.open_recording(item.recording_id)

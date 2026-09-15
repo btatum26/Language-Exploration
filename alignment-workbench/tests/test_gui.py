@@ -506,13 +506,15 @@ def test_import_action_uses_native_picker_values_and_opens_result(
         lambda *args, **kwargs: next(responses),
     )
 
+    monkeypatch.setattr(QtWidgets.QDialog, "exec", lambda self: QtWidgets.QDialog.DialogCode.Accepted)
     window.import_action.trigger()
 
     assert len(api.import_commands) == 1
     command = api.import_commands[0]
     assert command.source_audio_path == session.audio.local_path
     assert command.name == "Imported name"
-    assert command.language == "it"
+    assert command.language == "und"
+    assert command.metadata.languages == ()
     assert window.controller.session is session
     window.shutdown()
 

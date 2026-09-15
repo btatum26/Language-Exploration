@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from types import MappingProxyType
 from uuid import UUID, uuid4
@@ -56,6 +56,7 @@ from models import (
     LibraryVersion,
     NonEmptyStr,
     PinnedLibraryVersion,
+    RecordingMetadata,
     SaveRecordingSnapshotRequest,
     SignalAnnotation,
     TimeFrequencyBoxGeometry,
@@ -68,6 +69,7 @@ _NONEMPTY_STRING = TypeAdapter(NonEmptyStr)
 @dataclass(frozen=True, slots=True)
 class _EditableState:
     name: str
+    metadata: RecordingMetadata
     language: str
     default_speaker_ref: UUID | None
     bindings: tuple[LibraryBinding, ...]
@@ -220,6 +222,14 @@ class RecordingEditSession:
         self._redo.clear()
         self._closed = True
 
+    @property
+    def metadata(self) -> RecordingMetadata:
+        return self._state.metadata
+
+    def set_metadata(self, metadata: RecordingMetadata) -> None:
+        self._require_open()
+        self._mutate(replace(self._state, metadata=metadata))
+
     def set_name(self, name: str) -> None:
         self._require_open()
         value = _NONEMPTY_STRING.validate_python(name)
@@ -227,6 +237,7 @@ class RecordingEditSession:
             _EditableState(
                 name=value,
                 language=self.language,
+                metadata=self._state.metadata,
                 default_speaker_ref=self.default_speaker_ref,
                 bindings=self._state.bindings,
                 annotations=self.annotations,
@@ -242,6 +253,7 @@ class RecordingEditSession:
             _EditableState(
                 name=self.name,
                 language=value,
+                metadata=self._state.metadata,
                 default_speaker_ref=self.default_speaker_ref,
                 bindings=self._state.bindings,
                 annotations=self.annotations,
@@ -256,6 +268,7 @@ class RecordingEditSession:
             _EditableState(
                 name=self.name,
                 language=self.language,
+                metadata=self._state.metadata,
                 default_speaker_ref=speaker_id,
                 bindings=self._state.bindings,
                 annotations=self.annotations,
@@ -316,6 +329,7 @@ class RecordingEditSession:
                 _EditableState(
                     name=self.name,
                     language=self.language,
+                    metadata=self._state.metadata,
                     default_speaker_ref=self.default_speaker_ref,
                     bindings=self._state.bindings,
                     annotations=self.annotations + additions,
@@ -357,6 +371,7 @@ class RecordingEditSession:
                     _EditableState(
                         name=self.name,
                         language=self.language,
+                        metadata=self._state.metadata,
                         default_speaker_ref=self.default_speaker_ref,
                         bindings=self._state.bindings,
                         annotations=tuple(annotations),
@@ -380,6 +395,7 @@ class RecordingEditSession:
                     _EditableState(
                         name=self.name,
                         language=self.language,
+                        metadata=self._state.metadata,
                         default_speaker_ref=self.default_speaker_ref,
                         bindings=self._state.bindings,
                         annotations=tuple(annotations),
@@ -421,6 +437,7 @@ class RecordingEditSession:
             _EditableState(
                 name=self.name,
                 language=self.language,
+                metadata=self._state.metadata,
                 default_speaker_ref=self.default_speaker_ref,
                 bindings=bindings,
                 annotations=self.annotations,
@@ -458,6 +475,7 @@ class RecordingEditSession:
             _EditableState(
                 name=self.name,
                 language=self.language,
+                metadata=self._state.metadata,
                 default_speaker_ref=self.default_speaker_ref,
                 bindings=updated_bindings,
                 annotations=self.annotations,
@@ -567,6 +585,7 @@ class RecordingEditSession:
             name=self.name,
             default_speaker_ref=self.default_speaker_ref,
             language=self.language,
+            metadata=self._state.metadata,
             author=author,
             message=message,
             libraries=tuple(binding.pin for binding in self._state.bindings),
@@ -707,6 +726,7 @@ class RecordingEditSession:
         return _EditableState(
             name=snapshot.name,
             language=snapshot.language,
+            metadata=snapshot.metadata,
             default_speaker_ref=snapshot.default_speaker_ref,
             bindings=bindings,
             annotations=snapshot.annotations,

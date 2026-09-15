@@ -107,6 +107,7 @@ def load_recording(
         name=revision.name,
         default_speaker_ref=revision.default_speaker_ref,
         language=revision.language,
+        metadata=revision.discovery_metadata,
         audio_asset=audio_asset_from_row(audio_row),
         libraries=tuple(
             pinned_library_from_rows(library, version) for _, version, library in pin_rows

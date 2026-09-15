@@ -12,64 +12,12 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from application import RecordingListItem, SyncState
 from gui.controller import ApplicationClient, WorkbenchController
 from gui.microphone import MicrophoneDialog
+from gui.recordings_browser import RecordingsBrowser
 from gui.tasks import TaskRunner, TaskSubmitter
 from gui.track_stack import TrackStack
 from gui.track_widget import TrackEditor, TrackWidget, make_editor
 from gui.workspace import Track, WorkspaceController
 from gui.workspace_player import WorkspacePlayer
-
-
-class RecordingsBrowser(QtWidgets.QDialog):
-    add_requested = QtCore.Signal(object)
-
-    def __init__(self, catalog: WorkbenchController, parent: QtWidgets.QWidget) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Browse existing recordings")
-        self.resize(600, 440)
-        layout = QtWidgets.QVBoxLayout(self)
-        self.search = QtWidgets.QLineEdit()
-        self.search.setPlaceholderText("Search recordings")
-        self.items = QtWidgets.QListWidget()
-        self.state = QtWidgets.QLabel()
-        layout.addWidget(self.search)
-        layout.addWidget(self.items)
-        layout.addWidget(self.state)
-        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Cancel)
-        refresh = buttons.addButton("Refresh", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
-        add = buttons.addButton("Add recording", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole)
-        refresh.clicked.connect(catalog.refresh_recordings)
-        add.clicked.connect(self._add)
-        buttons.rejected.connect(self.reject)
-        self.items.itemDoubleClicked.connect(self._add)
-        layout.addWidget(buttons)
-        self.search.textChanged.connect(self._filter)
-        catalog.recordings_changed.connect(self.populate)
-        catalog.recordings_failed.connect(self.state.setText)
-        self.populate(catalog.recordings)
-
-    def populate(self, recordings: object) -> None:
-        self.items.clear()
-        for recording in cast(tuple[RecordingListItem, ...], recordings):
-            item = QtWidgets.QListWidgetItem(
-                f"{recording.display_name}\n{recording.duration_seconds:.2f} s  ·  "
-                f"revision {recording.revision_number}  ·  {recording.audio_status.value}"
-            )
-            item.setData(QtCore.Qt.ItemDataRole.UserRole, recording)
-            self.items.addItem(item)
-        self.state.setText(f"{self.items.count()} recordings")
-        self._filter()
-
-    def _filter(self) -> None:
-        query = self.search.text().casefold()
-        for row in range(self.items.count()):
-            item = self.items.item(row)
-            item.setHidden(query not in item.text().casefold())
-
-    def _add(self) -> None:
-        item = self.items.currentItem()
-        if item is not None and not item.isHidden():
-            self.add_requested.emit(item.data(QtCore.Qt.ItemDataRole.UserRole))
-            self.accept()
 
 
 class WorkstationWindow(QtWidgets.QMainWindow):
@@ -90,7 +38,7 @@ class WorkstationWindow(QtWidgets.QMainWindow):
         self._retrying = False
         self._removing: UUID | None = None
         self._build_ui()
-        self.browser = RecordingsBrowser(self.catalog, self)
+        self.browser = RecordingsBrowser(self.catalog, self, task_runner or self.catalog_runner)
         self.browser.add_requested.connect(self.add_recording)
         self.player.error.connect(self._error)
         self.player.state_changed.connect(
@@ -186,7 +134,8 @@ class WorkstationWindow(QtWidgets.QMainWindow):
         # Keep the take alive until the asynchronous import has copied it, or
         # the user cancels. Failed imports leave the dialog and take available.
         with TemporaryDirectory(prefix="workbench-microphone-") as directory:
-            dialog = MicrophoneDialog(Path(directory) / "recording.wav", self)
+            dialog = MicrophoneDialog(Path(directory) / "recording.wav", self,
+                                      recordings=self.catalog.recordings)
             editor: TrackEditor | None = None
 
             def add_take() -> None:
@@ -194,15 +143,19 @@ class WorkstationWindow(QtWidgets.QMainWindow):
                 if editor is None:
                     editor = self._new_editor()
                     editor.controller.error.connect(dialog.status.setText)
-                    editor.controller.busy_changed.connect(dialog.set_saving)
-                    editor.controller.session_changed.connect(import_finished)
+                    editor.controller.import_finished.connect(import_finished)
                 editor.controller.import_recording(
                     dialog.path, name=dialog.name.text().strip(),
                     language=dialog.language.text().strip(),
+                    metadata=dialog.metadata_editor.metadata(),
                 )
 
-            def import_finished(value: object) -> None:
-                if value is not None:
+            def import_finished(saved: bool) -> None:
+                dialog.set_saving(False)
+                if saved:
+                    self.statusBar().showMessage(
+                        f'Recording "{dialog.name.text().strip()}" saved to the database.', 10000
+                    )
                     dialog.accept()
 
             dialog.add_requested.connect(add_take)
@@ -212,13 +165,26 @@ class WorkstationWindow(QtWidgets.QMainWindow):
                 dialog._release()
                 if editor is not None:
                     editor.controller.error.disconnect(dialog.status.setText)
-                    editor.controller.busy_changed.disconnect(dialog.set_saving)
-                    editor.controller.session_changed.disconnect(import_finished)
+                    editor.controller.import_finished.disconnect(import_finished)
                     if editor in self.pending:
-                        self.pending.remove(editor)
-                        editor.shutdown()
-                        editor.deleteLater()
+                        self._dispose_pending_editor(editor)
                 dialog.deleteLater()
+
+    def _dispose_pending_editor(self, editor: TrackEditor) -> None:
+        # Catalog/definition reads can outlive a failed import. Never wait for
+        # database workers on the GUI thread when dismissing the recording dialog.
+        def dispose(busy: bool = False) -> None:
+            if busy:
+                return
+            if editor in self.pending:
+                self.pending.remove(editor)
+                editor.shutdown()
+                editor.deleteLater()
+
+        if editor.controller.busy:
+            editor.controller.busy_changed.connect(dispose)
+        else:
+            dispose()
 
     def _browse(self) -> None:
         self.catalog.refresh_recordings()

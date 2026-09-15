@@ -15,6 +15,7 @@ from gui.controller import (
     EditableRecording,
     WorkbenchController,
 )
+from gui.metadata_editor import MetadataEditor
 from gui.spectrogram import SpectrogramPreview, load_spectrogram
 from gui.tasks import TaskRunner, TaskSubmitter
 from gui.waveform import (
@@ -874,15 +875,21 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not accepted or not name.strip():
             return
-        language, accepted = QtWidgets.QInputDialog.getText(
-            self,
-            "Recording language",
-            "Language tag:",
-            text="und",
-        )
-        if not accepted or not language.strip() or not self._prepare_to_replace_session():
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Recording metadata (optional)")
+        layout = QtWidgets.QVBoxLayout(dialog)
+        metadata = MetadataEditor(self.controller.recordings)
+        layout.addWidget(metadata)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok |
+                                             QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if (dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted
+                or not self._prepare_to_replace_session()):
             return
-        self.controller.import_recording(source, name=name.strip(), language=language.strip())
+        self.controller.import_recording(source, name=name.strip(), language="und",
+                                         metadata=metadata.metadata())
 
     def _prepare_to_replace_session(self) -> bool:
         session = self.controller.session

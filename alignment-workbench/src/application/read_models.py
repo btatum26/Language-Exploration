@@ -9,6 +9,7 @@ from models import (
     AnnotatedRecordingSnapshot,
     AudioAsset,
     LibraryVersion,
+    RecordingMetadata,
     RevisionMetadata,
     Speaker,
 )
@@ -25,6 +26,10 @@ class RecordingCatalogRecord:
     audio_asset: AudioAsset
     revision_number: int
     revised_at: datetime
+    metadata: RecordingMetadata = RecordingMetadata()
+    language: str = "und"
+    added_at: datetime | None = None
+    transcript: str = ""
 
 
 class AudioAvailability(StrEnum):
@@ -43,6 +48,10 @@ class RecordingListItem:
     revision_number: int
     modified_at: datetime
     audio_status: AudioAvailability
+    metadata: RecordingMetadata = RecordingMetadata()
+    language: str = "und"
+    added_at: datetime | None = None
+    transcript: str = ""
 
 
 @dataclass(frozen=True, slots=True)

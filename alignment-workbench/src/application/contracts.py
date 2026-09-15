@@ -20,6 +20,7 @@ from models import (
     GeometryType,
     NonEmptyStr,
     PinnedLibraryVersion,
+    RecordingMetadata,
     SaveRecordingSnapshotRequest,
     SignalAnnotation,
 )
@@ -72,6 +73,7 @@ class CreateRecordingCommand(DomainModel):
     initial_revision_id: UUID = Field(default_factory=uuid4)
     source_audio_path: Path
     name: NonEmptyStr
+    metadata: RecordingMetadata = Field(default_factory=RecordingMetadata)
     language: NonEmptyStr
     default_speaker_ref: UUID | None = None
     libraries: tuple[PinnedLibraryVersion, ...] = ()

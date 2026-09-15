@@ -186,6 +186,8 @@ class RecordingHandler:
                 revision_number=record.revision_number,
                 modified_at=record.revised_at,
                 audio_status=self._audio_availability(record.audio_asset),
+                metadata=record.metadata, language=record.language,
+                added_at=record.added_at, transcript=record.transcript,
             )
             for record in records
         )
@@ -216,6 +218,7 @@ class RecordingHandler:
                 name=command.name,
                 default_speaker_ref=command.default_speaker_ref,
                 language=command.language,
+                metadata=command.metadata,
                 author=command.author,
                 message=command.message,
                 libraries=command.libraries,
@@ -324,6 +327,7 @@ class RecordingHandler:
             name=request.name,
             default_speaker_ref=request.default_speaker_ref,
             language=request.language,
+            metadata=request.metadata,
             audio_asset=request.audio_asset,
             libraries=request.libraries,
             annotations=request.annotations,
